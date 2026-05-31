@@ -47,6 +47,29 @@ const normalizeSupabaseActivity = (row) => {
   };
 };
 
+const fetchAllSupabaseActivities = async (supabase) => {
+  const pageSize = 1000;
+  let from = 0;
+  let allRows = [];
+
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLE)
+      .select('*')
+      .order('start_date_local', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    allRows = [...allRows, ...(data || [])];
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows;
+};
+
 // ==========================================
 // MOCK DATA GENERATOR (Supabase 스키마 기준)
 // ==========================================
@@ -180,12 +203,7 @@ export default function App() {
       setDataSource('loading');
       setLoadError('');
       const supabase = createClient(url, key);
-      const { data, error } = await supabase
-        .from(SUPABASE_TABLE)
-        .select('*')
-        .order('start_date_local', { ascending: false });
-
-      if (error) throw error;
+      const data = await fetchAllSupabaseActivities(supabase);
 
       setActivities((data || []).map(normalizeSupabaseActivity));
       setIsConnected(true);
@@ -351,18 +369,23 @@ export default function App() {
       }));
   }, [activities]);
 
-  // SVG Pace Line Coordinate helper to prevent empty coordinates
-  const pacePointsString = useMemo(() => {
-    if (paceHistory.length === 0) return "";
+  const paceChartPoints = useMemo(() => {
+    if (paceHistory.length === 0) return [];
+    const paces = paceHistory.map(h => h.pace).filter(p => Number.isFinite(p));
+    const minPace = Math.min(...paces);
+    const maxPace = Math.max(...paces);
+    const range = Math.max(maxPace - minPace, 1);
+
     return paceHistory.map((h, idx) => {
-      const totalCount = paceHistory.length;
-      const xPercent = (idx / (totalCount - 1)) * 90 + 5; // offset 5% to match markers
-      const minPace = 4.0;
-      const maxPace = 8.0;
-      const yPercent = ((h.pace - minPace) / (maxPace - minPace)) * 80 + 10;
-      return `${xPercent},${yPercent}`;
-    }).join(" ");
+      const x = paceHistory.length === 1 ? 50 : (idx / (paceHistory.length - 1)) * 90 + 5;
+      const y = ((h.pace - minPace) / range) * 70 + 15;
+      return { ...h, x, y };
+    });
   }, [paceHistory]);
+
+  const pacePointsString = useMemo(() => {
+    return paceChartPoints.map(point => `${point.x},${point.y}`).join(" ");
+  }, [paceChartPoints]);
 
   // 5. Heart Rate vs Pace Scatter Plot points
   const hrVsPacePoints = useMemo(() => {
@@ -962,7 +985,7 @@ async function fetchUserActivities() {
 
                 {/* Simulated Custom Line chart */}
                 <div className="relative h-44 w-full flex items-end justify-between px-2 pt-6">
-                  <svg className="absolute inset-0 w-full h-full p-2" preserveAspectRatio="none">
+                  <svg className="absolute inset-0 w-full h-full p-2" viewBox="0 0 100 100" preserveAspectRatio="none">
                     {pacePointsString && (
                       <polyline
                         fill="none"
@@ -974,17 +997,12 @@ async function fetchUserActivities() {
                       />
                     )}
                     {/* SVG Interactive coordinates */}
-                    {paceHistory.map((h, idx) => {
-                      const totalCount = paceHistory.length;
-                      const xPercent = (idx / (totalCount - 1)) * 90 + 5;
-                      const minPace = 4.0;
-                      const maxPace = 8.0;
-                      const yPercent = ((h.pace - minPace) / (maxPace - minPace)) * 80 + 10;
+                    {paceChartPoints.map((h, idx) => {
                       return (
                         <g key={idx}>
                           <circle
-                            cx={`${xPercent}%`}
-                            cy={`${yPercent}%`}
+                            cx={h.x}
+                            cy={h.y}
                             r="4.5"
                             className="fill-orange-500 hover:fill-amber-300 transition cursor-pointer stroke-slate-900 stroke-2"
                             title={`Pace: ${h.paceStr}`}
