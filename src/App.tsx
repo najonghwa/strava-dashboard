@@ -80,6 +80,99 @@ const fetchAllSupabaseActivities = async (supabase) => {
   return allRows;
 };
 
+const sportLabels = {
+  Run: 'Running',
+  Ride: 'Riding',
+  VirtualRide: 'Virtual Ride',
+  Swim: 'Swimming',
+  Hike: 'Hiking',
+  Walk: 'Walking',
+  AlpineSki: 'Alpine Ski',
+  NordicSki: 'Nordic Ski',
+  WeightTraining: 'Weight Training',
+  Workout: 'Workout',
+  Yoga: 'Yoga',
+};
+
+const sportIcons = {
+  Run: '🏃',
+  Ride: '🚴',
+  VirtualRide: '🚴',
+  Swim: '🏊',
+  Hike: '🥾',
+  Walk: '🚶',
+  AlpineSki: '🎿',
+  NordicSki: '🎿',
+  WeightTraining: '🏋️',
+  Workout: '💪',
+  Yoga: '🧘',
+};
+
+const formatSportName = (sport) => {
+  return `${sportIcons[sport] || '•'} ${sportLabels[sport] || sport || 'Unknown'}`;
+};
+
+const hasPositiveNumber = (value) => Number.isFinite(value) && value > 0;
+
+const decodePolyline = (encoded = '') => {
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const coordinates = [];
+
+  while (index < encoded.length) {
+    let shift = 0;
+    let result = 0;
+    let byte;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length);
+
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+    shift = 0;
+    result = 0;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length);
+
+    lng += result & 1 ? ~(result >> 1) : result >> 1;
+    coordinates.push([lat / 1e5, lng / 1e5]);
+  }
+
+  return coordinates;
+};
+
+const createRoutePath = (activity) => {
+  const encoded = activity?.raw?.map?.summary_polyline;
+  if (!encoded) return '';
+
+  const points = decodePolyline(encoded);
+  if (points.length < 2) return '';
+
+  const lats = points.map(([lat]) => lat);
+  const lngs = points.map(([, lng]) => lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const latRange = Math.max(maxLat - minLat, 0.00001);
+  const lngRange = Math.max(maxLng - minLng, 0.00001);
+
+  return points
+    .map(([lat, lng], index) => {
+      const x = ((lng - minLng) / lngRange) * 84 + 8;
+      const y = (1 - (lat - minLat) / latRange) * 84 + 8;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(' ');
+};
+
 // ==========================================
 // MOCK DATA GENERATOR (Supabase 스키마 기준)
 // ==========================================
@@ -200,6 +293,8 @@ export default function App() {
   const [newRunCadence, setNewRunCadence] = useState('172');
   const [newRunDate, setNewRunDate] = useState(new Date().toISOString().substring(0, 10));
 
+  const selectedRoutePath = useMemo(() => createRoutePath(selectedActivity), [selectedActivity]);
+
   const loadSupabaseActivities = async (url = SUPABASE_URL, key = SUPABASE_ANON_KEY, showAlert = false) => {
     if (!url || !key) {
       setActivities([]);
@@ -256,8 +351,9 @@ export default function App() {
   const filteredActivities = useMemo(() => {
     return activities.filter(act => {
       const matchSport = selectedSport === 'All' || act.sport_type === selectedSport;
-      const matchSearch = act.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          act.device_name.toLowerCase().includes(searchTerm.toLowerCase());
+      const keyword = searchTerm.toLowerCase();
+      const matchSearch = String(act.name || '').toLowerCase().includes(keyword) || 
+                          String(act.device_name || '').toLowerCase().includes(keyword);
       return matchSport && matchSearch;
     });
   }, [activities, selectedSport, searchTerm]);
@@ -276,7 +372,8 @@ export default function App() {
 
   // Statistics Calculation (Based on active dynamic year)
   const stats = useMemo(() => {
-    const runsOnly = activities.filter(a => a.sport_type === 'Run');
+    const runsWithPace = activities.filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.pace_min_per_km));
+    const runsWithHR = activities.filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.average_heartrate));
     const totalCount = filteredActivities.length;
     const totalDistance = filteredActivities.reduce((sum, a) => sum + a.distance_km, 0);
     const totalTime = filteredActivities.reduce((sum, a) => sum + a.moving_time, 0);
@@ -287,11 +384,11 @@ export default function App() {
       .reduce((sum, a) => sum + a.distance_km, 0);
 
     // Running Pace & HR calculation
-    const runningPaceSum = runsOnly.reduce((sum, a) => sum + a.pace_min_per_km, 0);
-    const avgRunningPaceDecimal = runsOnly.length > 0 ? runningPaceSum / runsOnly.length : 0;
+    const runningPaceSum = runsWithPace.reduce((sum, a) => sum + a.pace_min_per_km, 0);
+    const avgRunningPaceDecimal = runsWithPace.length > 0 ? runningPaceSum / runsWithPace.length : 0;
     
-    const runningHRSum = runsOnly.reduce((sum, a) => sum + (a.average_heartrate || 0), 0);
-    const avgRunningHR = runsOnly.length > 0 ? Math.round(runningHRSum / runsOnly.length) : 0;
+    const runningHRSum = runsWithHR.reduce((sum, a) => sum + a.average_heartrate, 0);
+    const avgRunningHR = runsWithHR.length > 0 ? Math.round(runningHRSum / runsWithHR.length) : 0;
 
     return {
       totalCount,
@@ -363,13 +460,19 @@ export default function App() {
     activities.forEach(a => {
       counts[a.sport_type] = (counts[a.sport_type] || 0) + 1;
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
   }, [activities]);
+
+  const sportFilterOptions = useMemo(() => {
+    return ['All', ...sportRatio.map(item => item.name)];
+  }, [sportRatio]);
 
   // 4. Pace Progression over time (Running Only)
   const paceHistory = useMemo(() => {
     return activities
-      .filter(a => a.sport_type === 'Run')
+      .filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.pace_min_per_km))
       .slice(0, 20)
       .reverse()
       .map(a => ({
@@ -414,8 +517,8 @@ export default function App() {
 
   // 5. Heart Rate vs Pace Scatter Plot points
   const hrVsPacePoints = useMemo(() => {
-    return activities
-      .filter(a => a.sport_type === 'Run' && a.average_heartrate && a.pace_min_per_km)
+    const points = activities
+      .filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.average_heartrate) && hasPositiveNumber(a.pace_min_per_km))
       .slice(0, 40)
       .map(a => {
         const speedKmh = 60 / a.pace_min_per_km;
@@ -430,11 +533,46 @@ export default function App() {
           speedKmh
         };
       });
+
+    if (points.length === 0) return [];
+
+    const hrs = points.map(point => point.hr);
+    const paces = points.map(point => point.pace);
+    const minHr = Math.min(...hrs);
+    const maxHr = Math.max(...hrs);
+    const minPace = Math.min(...paces);
+    const maxPace = Math.max(...paces);
+    const hrRange = Math.max(maxHr - minHr, 1);
+    const paceRange = Math.max(maxPace - minPace, 1);
+
+    return points.map(point => ({
+      ...point,
+      x: ((point.hr - minHr) / hrRange) * 80 + 10,
+      y: ((point.pace - minPace) / paceRange) * 70 + 15,
+      minHr,
+      maxHr,
+      minPace,
+      maxPace,
+    }));
   }, [activities]);
+
+  const hrPaceLabels = useMemo(() => {
+    if (hrVsPacePoints.length === 0) {
+      return { lowHr: 0, highHr: 0, fast: '0:00', slow: '0:00' };
+    }
+    return {
+      lowHr: Math.round(hrVsPacePoints[0].minHr),
+      highHr: Math.round(hrVsPacePoints[0].maxHr),
+      fast: formatPace(hrVsPacePoints[0].minPace),
+      slow: formatPace(hrVsPacePoints[0].maxPace),
+    };
+  }, [hrVsPacePoints]);
 
   // 6. Running Efficiency Score Calculation
   const efficiencyTrends = useMemo(() => {
-    const runs = activities.filter(a => a.sport_type === 'Run' && a.average_heartrate).slice(0, 30);
+    const runs = activities
+      .filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.average_heartrate) && hasPositiveNumber(a.pace_min_per_km))
+      .slice(0, 30);
     const scoreMap = runs.map(a => {
       const speedKmh = 60 / a.pace_min_per_km;
       const score = parseFloat(((speedKmh * 100) / a.average_heartrate).toFixed(2));
@@ -459,7 +597,7 @@ export default function App() {
   // 7. Zone Heart Rate Distribution
   const zoneDistribution = useMemo(() => {
     let z1 = 0, z2 = 0, z3 = 0, z4 = 0, z5 = 0;
-    const runs = activities.filter(a => a.sport_type === 'Run' && a.average_heartrate);
+    const runs = activities.filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.average_heartrate));
     runs.forEach(a => {
       const hr = a.average_heartrate;
       if (hr < 125) z1++;
@@ -493,6 +631,7 @@ export default function App() {
     const pb5k = getBest(5.0, 0.5);
     const pb10k = getBest(10.0, 0.8);
     const pbHalf = getBest(21.1, 1.5);
+    const pbMarathon = getBest(42.195, 2.0);
 
     const absoluteNewestRunId = runs[0]?.id;
 
@@ -502,6 +641,7 @@ export default function App() {
       { name: '5 km', time: pb5k ? formatDuration(pb5k.moving_time * (5 / pb5k.distance_km)) : 'N/A', isNew: pb5k?.id === absoluteNewestRunId, raw: pb5k },
       { name: '10 km', time: pb10k ? formatDuration(pb10k.moving_time * (10 / pb10k.distance_km)) : 'N/A', isNew: pb10k?.id === absoluteNewestRunId, raw: pb10k },
       { name: '하프 마라톤', time: pbHalf ? formatDuration(pbHalf.moving_time * (21.1 / pbHalf.distance_km)) : 'N/A', isNew: pbHalf?.id === absoluteNewestRunId, raw: pbHalf },
+      { name: '풀코스', time: pbMarathon ? formatDuration(pbMarathon.moving_time * (42.195 / pbMarathon.distance_km)) : 'N/A', isNew: pbMarathon?.id === absoluteNewestRunId, raw: pbMarathon },
     ];
   }, [activities]);
 
@@ -654,7 +794,7 @@ export default function App() {
         <div className="mb-6 p-4 bg-slate-900 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">운동 종목 필터</span>
-            {['All', 'Run', 'Ride', 'Swim', 'Hike', 'AlpineSki'].map((sport) => (
+            {sportFilterOptions.map((sport) => (
               <button
                 key={sport}
                 onClick={() => setSelectedSport(sport)}
@@ -664,11 +804,7 @@ export default function App() {
                     : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
                 }`}
               >
-                {sport === 'All' ? '전체 보기' : 
-                 sport === 'Run' ? '🏃 러닝' : 
-                 sport === 'Ride' ? '🚴 사이클' : 
-                 sport === 'Swim' ? '🏊 수영' : 
-                 sport === 'Hike' ? '🥾 하이킹' : '🎿 스키'}
+                {sport === 'All' ? '전체 보기' : formatSportName(sport)}
               </button>
             ))}
           </div>
@@ -796,7 +932,7 @@ async function fetchUserActivities() {
                           act.sport_type === 'Ride' ? 'bg-emerald-500/10 text-emerald-400' :
                           'bg-indigo-500/10 text-indigo-400'
                         }`}>
-                          {act.sport_type}
+                          {formatSportName(act.sport_type)}
                         </span>
                       </td>
                       <td className="px-4 py-3 font-bold text-white">{act.distance_km} km</td>
@@ -984,10 +1120,7 @@ async function fetchUserActivities() {
                         <div className="flex justify-between text-xs font-semibold">
                           <span className="text-slate-300 flex items-center gap-1.5">
                             <span className={`w-2.5 h-2.5 rounded-full ${colors[index % colors.length]}`}></span>
-                            {item.name === 'Run' ? '🏃 Running' : 
-                             item.name === 'Ride' ? '🚴 Riding' : 
-                             item.name === 'Swim' ? '🏊 Swimming' : 
-                             item.name === 'Hike' ? '🥾 Hiking' : '🎿 AlpineSki'}
+                            {formatSportName(item.name)}
                           </span>
                           <span className="text-slate-400 font-mono">{item.value}회 ({percentage}%)</span>
                         </div>
@@ -1013,7 +1146,7 @@ async function fetchUserActivities() {
                   <div className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-slate-600">{paceChartLabels.mid}</div>
                   <div className="absolute left-2 bottom-6 text-[9px] font-mono text-slate-500">{paceChartLabels.slow}</div>
 
-                  <svg className="absolute left-10 right-3 top-3 bottom-6 h-[calc(100%-2.25rem)] w-[calc(100%-3.25rem)]" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <svg className="absolute left-10 right-3 top-3 bottom-6 h-[calc(100%-2.25rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
                     {[15, 50, 85].map((y) => (
                       <line
                         key={`y-${y}`}
@@ -1056,7 +1189,8 @@ async function fetchUserActivities() {
                             cx={h.x}
                             cy={h.y}
                             r="2.1"
-                            className="fill-orange-500 hover:fill-amber-300 transition cursor-pointer stroke-slate-900 stroke-2"
+                            className="fill-orange-500 hover:fill-amber-300 transition cursor-pointer stroke-slate-900"
+                            strokeWidth="1.2"
                             title={`Pace: ${h.paceStr}`}
                             vectorEffect="non-scaling-stroke"
                           />
@@ -1083,7 +1217,7 @@ async function fetchUserActivities() {
                 <p className="text-xs text-slate-400 mb-4">유산소 러닝 코치용 연관 산점도</p>
 
                 {/* Custom Interactive SVG Scatter Plot */}
-                <div className="relative h-44 w-full bg-slate-950 rounded-lg p-2 border border-slate-800 overflow-hidden">
+                <div className="hidden">
                   <div className="absolute top-1 left-2 text-[9px] text-slate-500">Pace (느림 ↑)</div>
                   <div className="absolute bottom-1 right-2 text-[9px] text-slate-500">심박수 (bpm →)</div>
                   
@@ -1101,7 +1235,41 @@ async function fetchUserActivities() {
                     );
                   })}
                 </div>
+                <div className="relative h-44 w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-3 pt-3 pb-7">
+                  <div className="absolute left-2 top-2 text-[9px] font-mono text-slate-500">{hrPaceLabels.fast}</div>
+                  <div className="absolute left-2 bottom-7 text-[9px] font-mono text-slate-500">{hrPaceLabels.slow}</div>
+                  <div className="absolute bottom-1 left-10 right-3 flex justify-between text-[9px] font-mono text-slate-500">
+                    <span>{hrPaceLabels.lowHr} bpm</span>
+                    <span>{hrPaceLabels.highHr} bpm</span>
+                  </div>
+                  <div className="absolute top-2 right-3 text-[9px] text-cyan-400">왼쪽 위일수록 효율적</div>
+                  <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+                    {[15, 50, 85].map((y) => (
+                      <line key={`hrp-y-${y}`} x1="0" y1={y} x2="100" y2={y} stroke="#1e293b" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+                    ))}
+                    {[10, 50, 90].map((x) => (
+                      <line key={`hrp-x-${x}`} x1={x} y1="0" x2={x} y2="100" stroke="#0f172a" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+                    ))}
+                    <line x1="10" y1="15" x2="90" y2="85" stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
+                    {hrVsPacePoints.map((pt, idx) => (
+                      <circle
+                        key={idx}
+                        cx={pt.x}
+                        cy={pt.y}
+                        r="2.2"
+                        className="fill-orange-500 hover:fill-rose-400 transition cursor-pointer stroke-slate-900"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                      >
+                        <title>{`${pt.date} | 페이스 ${pt.paceStr}/km | 심박 ${pt.hr} bpm`}</title>
+                      </circle>
+                    ))}
+                  </svg>
+                </div>
                 <div className="mt-2 text-center text-[11px] text-slate-400 leading-tight">
+                  가로축은 평균 심박, 세로축은 페이스입니다. 왼쪽 위에 가까울수록 낮은 심박으로 빠르게 달린 효율적인 기록입니다.
+                </div>
+                <div className="hidden">
                   점 하나는 1회의 러닝 세션입니다. 동일 심박에서 하단(빠른 페이스)으로 점이 이동할수록 유산소 능력이 발달함을 의미합니다.
                 </div>
               </div>
@@ -1289,15 +1457,28 @@ async function fetchUserActivities() {
               
               {/* GPS Track Map Visualizer */}
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 lg:col-span-2 relative overflow-hidden group">
-                <h3 className="text-md font-bold text-white mb-1">GPS 러닝 트랙 시각화 (Strava Map Mock)</h3>
-                <p className="text-xs text-slate-400 mb-4">Garmin 기기로부터 복원된 최근 GPS 액티비티 경로</p>
+                <h3 className="text-md font-bold text-white mb-1">GPS 트랙 시각화</h3>
+                <p className="text-xs text-slate-400 mb-4">Strava summary polyline 기반 실제 활동 경로</p>
                 
                 <div className="h-64 bg-slate-950 rounded-xl relative flex items-center justify-center overflow-hidden border border-slate-800">
                   <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:2rem_2rem] opacity-30"></div>
                   
-                  <svg className="w-full h-full max-h-56 max-w-lg stroke-orange-500 stroke-[4] fill-none stroke-linecap-round">
-                    <path d={generateMapPath(selectedActivity?.id || 101)} className="animate-pulse" />
-                  </svg>
+                  {selectedRoutePath ? (
+                    <svg className="w-full h-full max-h-56 max-w-lg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+                      <path
+                        d={selectedRoutePath}
+                        className="stroke-orange-500 fill-none"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </svg>
+                  ) : (
+                    <div className="relative z-10 text-center text-sm text-slate-500">
+                      이 활동에는 표시할 GPS 경로가 없습니다.
+                    </div>
+                  )}
 
                   <div className="absolute bottom-3 left-3 bg-slate-900/90 backdrop-blur text-[11px] p-3 rounded-lg border border-slate-800 text-slate-300">
                     <span className="font-bold text-white block">📍 주요 코스 정보</span>
@@ -1361,7 +1542,7 @@ async function fetchUserActivities() {
             <div className="p-5 border-b border-slate-850 flex justify-between items-start">
               <div>
                 <span className="text-xs bg-orange-500/10 text-orange-400 font-bold px-2 py-0.5 rounded uppercase">
-                  {selectedActivity.sport_type}
+                  {formatSportName(selectedActivity.sport_type)}
                 </span>
                 <h3 className="text-lg font-bold text-white mt-1">{selectedActivity.name}</h3>
                 <p className="text-xs text-slate-400">{new Date(selectedActivity.start_date_local).toLocaleString('ko-KR')}</p>
