@@ -209,8 +209,9 @@ export default function App() {
   // Format Helper functions
   const formatPace = (paceDecimal) => {
     if (!paceDecimal || isNaN(paceDecimal)) return '0:00';
-    const mins = Math.floor(paceDecimal);
-    const secs = Math.round((paceDecimal - mins) * 60);
+    const totalSeconds = Math.round(paceDecimal * 60);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
