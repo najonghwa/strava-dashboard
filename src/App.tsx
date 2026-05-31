@@ -276,6 +276,7 @@ export default function App() {
   const [activities, setActivities] = useState([]);
   const [selectedSport, setSelectedSport] = useState('All');
   const [selectedActivity, setSelectedActivity] = useState(null);
+  const [routeActivity, setRouteActivity] = useState(null);
   const [yearlyGoal, setYearlyGoal] = useState(1000);
   const [supabaseUrl, setSupabaseUrl] = useState(SUPABASE_URL);
   const [supabaseKey, setSupabaseKey] = useState(SUPABASE_ANON_KEY);
@@ -293,7 +294,7 @@ export default function App() {
   const [newRunCadence, setNewRunCadence] = useState('172');
   const [newRunDate, setNewRunDate] = useState(new Date().toISOString().substring(0, 10));
 
-  const selectedRoutePath = useMemo(() => createRoutePath(selectedActivity), [selectedActivity]);
+  const selectedRoutePath = useMemo(() => createRoutePath(routeActivity), [routeActivity]);
 
   const loadSupabaseActivities = async (url = SUPABASE_URL, key = SUPABASE_ANON_KEY, showAlert = false) => {
     if (!url || !key) {
@@ -309,8 +310,10 @@ export default function App() {
       setLoadError('');
       const supabase = createClient(url, key);
       const data = await fetchAllSupabaseActivities(supabase);
+      const normalizedActivities = (data || []).map(normalizeSupabaseActivity);
 
-      setActivities((data || []).map(normalizeSupabaseActivity));
+      setActivities(normalizedActivities);
+      setRouteActivity(normalizedActivities.find(activity => activity.raw?.map?.summary_polyline) || normalizedActivities[0] || null);
       setIsConnected(true);
       setDataSource('supabase');
     } catch (error) {
@@ -921,7 +924,10 @@ async function fetchUserActivities() {
                   {filteredActivities.map((act) => (
                     <tr
                       key={act.id}
-                      onClick={() => setSelectedActivity(act)}
+                      onClick={() => {
+                        setRouteActivity(act);
+                        setSelectedActivity(act);
+                      }}
                       className="hover:bg-slate-800/50 cursor-pointer transition"
                     >
                       <td className="px-4 py-3 font-semibold text-white">{act.name}</td>
@@ -1434,6 +1440,7 @@ async function fetchUserActivities() {
                               title={`${day?.date.toLocaleDateString()}: ${dist > 0 ? `${dist} km 러닝` : '휴식 또는 타종목'}`}
                               onClick={() => {
                                 if (day?.runs.length) {
+                                  setRouteActivity(day.runs[0]);
                                   setSelectedActivity(day.runs[0]);
                                 }
                               }}
@@ -1459,6 +1466,13 @@ async function fetchUserActivities() {
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 lg:col-span-2 relative overflow-hidden group">
                 <h3 className="text-md font-bold text-white mb-1">GPS 트랙 시각화</h3>
                 <p className="text-xs text-slate-400 mb-4">Strava summary polyline 기반 실제 활동 경로</p>
+                {routeActivity && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                    <span className="rounded bg-slate-950 px-2 py-1 text-orange-300">{formatSportName(routeActivity.sport_type)}</span>
+                    <span className="font-semibold text-slate-200">{routeActivity.name}</span>
+                    <span>{new Date(routeActivity.start_date_local).toLocaleString('ko-KR')}</span>
+                  </div>
+                )}
                 
                 <div className="h-64 bg-slate-950 rounded-xl relative flex items-center justify-center overflow-hidden border border-slate-800">
                   <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:2rem_2rem] opacity-30"></div>
@@ -1509,7 +1523,12 @@ async function fetchUserActivities() {
                     return (
                       <div
                         key={idx}
-                        onClick={() => dayAct && setSelectedActivity(dayAct)}
+                        onClick={() => {
+                          if (dayAct) {
+                            setRouteActivity(dayAct);
+                            setSelectedActivity(dayAct);
+                          }
+                        }}
                         className={`h-9 flex flex-col items-center justify-center rounded-lg transition-all ${
                           isDay ? 'bg-slate-950/40 border border-slate-850 cursor-pointer' : 'text-transparent'
                         } ${dayAct ? 'border-orange-500 bg-orange-950/20 hover:bg-orange-950/40' : ''}`}
