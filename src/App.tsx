@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -173,6 +175,85 @@ const createRoutePath = (activity) => {
     .join(' ');
 };
 
+const getRouteCoordinates = (activity) => {
+  const encoded = activity?.raw?.map?.summary_polyline;
+  if (!encoded) return [];
+  return decodePolyline(encoded);
+};
+
+const RouteMap = ({ activity }) => {
+  const mapRef = React.useRef(null);
+  const containerRef = React.useRef(null);
+  const coordinates = useMemo(() => getRouteCoordinates(activity), [activity]);
+
+  useEffect(() => {
+    if (!containerRef.current || coordinates.length < 2) return;
+
+    if (!mapRef.current) {
+      mapRef.current = L.map(containerRef.current, {
+        zoomControl: false,
+        attributionControl: false,
+        scrollWheelZoom: false,
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+      }).addTo(mapRef.current);
+    }
+
+    const map = mapRef.current;
+    map.eachLayer((layer) => {
+      if (layer instanceof L.Polyline || layer instanceof L.CircleMarker) {
+        map.removeLayer(layer);
+      }
+    });
+
+    const route = L.polyline(coordinates, {
+      color: '#f97316',
+      weight: 5,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+
+    L.circleMarker(coordinates[0], {
+      radius: 5,
+      color: '#22c55e',
+      fillColor: '#22c55e',
+      fillOpacity: 1,
+    }).addTo(map);
+
+    L.circleMarker(coordinates[coordinates.length - 1], {
+      radius: 5,
+      color: '#f43f5e',
+      fillColor: '#f43f5e',
+      fillOpacity: 1,
+    }).addTo(map);
+
+    map.fitBounds(route.getBounds(), { padding: [24, 24] });
+    setTimeout(() => map.invalidateSize(), 0);
+  }, [coordinates]);
+
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  if (coordinates.length < 2) {
+    return (
+      <div className="relative z-10 text-center text-sm text-slate-500">
+        이 활동에는 표시할 GPS 경로가 없습니다.
+      </div>
+    );
+  }
+
+  return <div ref={containerRef} className="absolute inset-0 z-0" />;
+};
+
 // ==========================================
 // MOCK DATA GENERATOR (Supabase 스키마 기준)
 // ==========================================
@@ -295,6 +376,12 @@ export default function App() {
   const [newRunDate, setNewRunDate] = useState(new Date().toISOString().substring(0, 10));
 
   const selectedRoutePath = useMemo(() => createRoutePath(routeActivity), [routeActivity]);
+
+  const routeActivities = useMemo(() => {
+    return activities
+      .filter(activity => activity.raw?.map?.summary_polyline)
+      .slice(0, 12);
+  }, [activities]);
 
   const loadSupabaseActivities = async (url = SUPABASE_URL, key = SUPABASE_ANON_KEY, showAlert = false) => {
     if (!url || !key) {
@@ -1466,6 +1553,25 @@ async function fetchUserActivities() {
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 lg:col-span-2 relative overflow-hidden group">
                 <h3 className="text-md font-bold text-white mb-1">GPS 트랙 시각화</h3>
                 <p className="text-xs text-slate-400 mb-4">Strava summary polyline 기반 실제 활동 경로</p>
+                {routeActivities.length > 0 && (
+                  <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
+                    {routeActivities.map((activity) => (
+                      <button
+                        key={activity.id}
+                        onClick={() => setRouteActivity(activity)}
+                        className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs transition ${
+                          routeActivity?.id === activity.id
+                            ? 'border-orange-500 bg-orange-500/10 text-white'
+                            : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                        }`}
+                        title={`${activity.name} | ${new Date(activity.start_date_local).toLocaleString('ko-KR')}`}
+                      >
+                        <span className="block font-semibold">{activity.name}</span>
+                        <span className="font-mono text-[10px] opacity-80">{new Date(activity.start_date_local).toLocaleDateString('ko-KR')} · {activity.distance_km.toFixed(1)} km</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {routeActivity && (
                   <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                     <span className="rounded bg-slate-950 px-2 py-1 text-orange-300">{formatSportName(routeActivity.sport_type)}</span>
@@ -1474,27 +1580,10 @@ async function fetchUserActivities() {
                   </div>
                 )}
                 
-                <div className="h-64 bg-slate-950 rounded-xl relative flex items-center justify-center overflow-hidden border border-slate-800">
-                  <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:2rem_2rem] opacity-30"></div>
-                  
-                  {selectedRoutePath ? (
-                    <svg className="w-full h-full max-h-56 max-w-lg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
-                      <path
-                        d={selectedRoutePath}
-                        className="stroke-orange-500 fill-none"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    </svg>
-                  ) : (
-                    <div className="relative z-10 text-center text-sm text-slate-500">
-                      이 활동에는 표시할 GPS 경로가 없습니다.
-                    </div>
-                  )}
+                <div className="h-72 bg-slate-950 rounded-xl relative flex items-center justify-center overflow-hidden border border-slate-800">
+                  <RouteMap activity={routeActivity} />
 
-                  <div className="absolute bottom-3 left-3 bg-slate-900/90 backdrop-blur text-[11px] p-3 rounded-lg border border-slate-800 text-slate-300">
+                  <div className="absolute bottom-3 left-3 z-10 bg-slate-900/90 backdrop-blur text-[11px] p-3 rounded-lg border border-slate-800 text-slate-300">
                     <span className="font-bold text-white block">📍 주요 코스 정보</span>
                     <span>상세 경로가 포함된 가민 FIT 수신 완료</span>
                   </div>
