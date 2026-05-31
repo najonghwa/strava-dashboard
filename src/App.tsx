@@ -16,6 +16,14 @@ const normalizeDateTime = (value) => {
   return String(value).replace(' ', 'T');
 };
 
+const normalizeLocalDateTime = (value) => {
+  if (!value) return new Date().toISOString().replace(/(Z|[+-]\d{2}(?::?\d{2})?)$/, '');
+  return String(value)
+    .trim()
+    .replace(' ', 'T')
+    .replace(/(Z|[+-]\d{2}(?::?\d{2})?)$/, '');
+};
+
 const normalizeSupabaseActivity = (row) => {
   let raw = row.raw || {};
   if (typeof raw === 'string') {
@@ -31,7 +39,9 @@ const normalizeSupabaseActivity = (row) => {
     athlete_id: row.athlete_id,
     name: row.name || 'Activity',
     sport_type: row.sport_type || raw?.sport_type || raw?.type || 'Run',
-    start_date_local: normalizeDateTime(row.start_date_local || row.start_date),
+    start_date_local: row.start_date_local
+      ? normalizeLocalDateTime(row.start_date_local)
+      : normalizeDateTime(row.start_date),
     distance_km: toNumber(row.distance_km, toNumber(row.distance_m) / 1000),
     moving_time: toNumber(row.moving_time),
     elapsed_time: toNumber(row.elapsed_time, toNumber(row.moving_time)),
