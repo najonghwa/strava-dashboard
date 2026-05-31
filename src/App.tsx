@@ -1,4 +1,51 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_TABLE = import.meta.env.VITE_SUPABASE_TABLE || 'activities';
+
+const toNumber = (value, fallback = 0) => {
+  if (value === null || value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeDateTime = (value) => {
+  if (!value) return new Date().toISOString();
+  return String(value).replace(' ', 'T');
+};
+
+const normalizeSupabaseActivity = (row) => {
+  let raw = row.raw || {};
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = {};
+    }
+  }
+
+  return {
+    id: row.id,
+    athlete_id: row.athlete_id,
+    name: row.name || 'Activity',
+    sport_type: row.sport_type || raw?.sport_type || raw?.type || 'Run',
+    start_date_local: normalizeDateTime(row.start_date_local || row.start_date),
+    distance_km: toNumber(row.distance_km, toNumber(row.distance_m) / 1000),
+    moving_time: toNumber(row.moving_time),
+    elapsed_time: toNumber(row.elapsed_time, toNumber(row.moving_time)),
+    pace_min_per_km: toNumber(row.pace_min_per_km),
+    average_speed: toNumber(row.average_speed),
+    average_heartrate: toNumber(row.average_heartrate),
+    max_heartrate: toNumber(row.max_heartrate),
+    average_cadence: toNumber(row.average_cadence),
+    average_watts: toNumber(row.average_watts),
+    total_elevation_gain: toNumber(row.total_elevation_gain),
+    device_name: row.device_name || 'Unknown device',
+    raw,
+  };
+};
 
 // ==========================================
 // MOCK DATA GENERATOR (Supabase 스키마 기준)
@@ -104,8 +151,8 @@ export default function App() {
   const [selectedSport, setSelectedSport] = useState('All');
   const [selectedActivity, setSelectedActivity] = useState(null);
   const [yearlyGoal, setYearlyGoal] = useState(1000);
-  const [supabaseUrl, setSupabaseUrl] = useState('');
-  const [supabaseKey, setSupabaseKey] = useState('');
+  const [supabaseUrl, setSupabaseUrl] = useState(SUPABASE_URL);
+  const [supabaseKey, setSupabaseKey] = useState(SUPABASE_ANON_KEY);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard'); 
   const [searchTerm, setSearchTerm] = useState('');
@@ -118,8 +165,36 @@ export default function App() {
   const [newRunCadence, setNewRunCadence] = useState('172');
   const [newRunDate, setNewRunDate] = useState(new Date().toISOString().substring(0, 10));
 
+  const loadSupabaseActivities = async (url = SUPABASE_URL, key = SUPABASE_ANON_KEY, showAlert = false) => {
+    if (!url || !key) {
+      setActivities(generateMockData());
+      setIsConnected(false);
+      return;
+    }
+
+    try {
+      const supabase = createClient(url, key);
+      const { data, error } = await supabase
+        .from(SUPABASE_TABLE)
+        .select('*')
+        .order('start_date_local', { ascending: false });
+
+      if (error) throw error;
+
+      setActivities((data || []).map(normalizeSupabaseActivity));
+      setIsConnected(true);
+    } catch (error) {
+      console.error('Failed to load Supabase activities:', error);
+      setActivities(generateMockData());
+      setIsConnected(false);
+      if (showAlert) {
+        alert('Supabase 데이터를 불러오지 못했습니다. URL, anon key, 테이블 이름, RLS 정책을 확인해주세요.');
+      }
+    }
+  };
+
   useEffect(() => {
-    setActivities(generateMockData());
+    loadSupabaseActivities();
   }, []);
 
   // Format Helper functions
@@ -453,7 +528,7 @@ export default function App() {
       alert("Supabase URL과 API Key를 입력해주십시오.");
       return;
     }
-    setIsConnected(true);
+    loadSupabaseActivities(supabaseUrl, supabaseKey, true);
   };
 
   return (
