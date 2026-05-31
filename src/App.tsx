@@ -387,6 +387,21 @@ export default function App() {
     return paceChartPoints.map(point => `${point.x},${point.y}`).join(" ");
   }, [paceChartPoints]);
 
+  const paceChartLabels = useMemo(() => {
+    if (paceChartPoints.length === 0) {
+      return { fast: '0:00', mid: '0:00', slow: '0:00' };
+    }
+    const paces = paceChartPoints.map(point => point.pace);
+    const fast = Math.min(...paces);
+    const slow = Math.max(...paces);
+    const mid = (fast + slow) / 2;
+    return {
+      fast: formatPace(fast),
+      mid: formatPace(mid),
+      slow: formatPace(slow),
+    };
+  }, [paceChartPoints]);
+
   // 5. Heart Rate vs Pace Scatter Plot points
   const hrVsPacePoints = useMemo(() => {
     return activities
@@ -983,41 +998,69 @@ async function fetchUserActivities() {
                 </div>
                 <p className="text-xs text-slate-400 mb-4">최근 러닝 평균 페이스 추이 관찰</p>
 
-                {/* Simulated Custom Line chart */}
-                <div className="relative h-44 w-full flex items-end justify-between px-2 pt-6">
-                  <svg className="absolute inset-0 w-full h-full p-2" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <div className="relative h-36 w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-3 pt-3 pb-6">
+                  <div className="absolute left-2 top-2 text-[9px] font-mono text-slate-500">{paceChartLabels.fast}</div>
+                  <div className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-slate-600">{paceChartLabels.mid}</div>
+                  <div className="absolute left-2 bottom-6 text-[9px] font-mono text-slate-500">{paceChartLabels.slow}</div>
+
+                  <svg className="absolute left-10 right-3 top-3 bottom-6 h-[calc(100%-2.25rem)] w-[calc(100%-3.25rem)]" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    {[15, 50, 85].map((y) => (
+                      <line
+                        key={`y-${y}`}
+                        x1="0"
+                        y1={y}
+                        x2="100"
+                        y2={y}
+                        stroke="#1e293b"
+                        strokeWidth="0.6"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
+                    {[5, 50, 95].map((x) => (
+                      <line
+                        key={`x-${x}`}
+                        x1={x}
+                        y1="0"
+                        x2={x}
+                        y2="100"
+                        stroke="#0f172a"
+                        strokeWidth="0.6"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
                     {pacePointsString && (
                       <polyline
                         fill="none"
                         stroke="#f97316"
-                        strokeWidth="2.5"
+                        strokeWidth="1.8"
                         strokeLinecap="round"
                         strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
                         points={pacePointsString}
                       />
                     )}
-                    {/* SVG Interactive coordinates */}
                     {paceChartPoints.map((h, idx) => {
                       return (
                         <g key={idx}>
                           <circle
                             cx={h.x}
                             cy={h.y}
-                            r="4.5"
+                            r="2.1"
                             className="fill-orange-500 hover:fill-amber-300 transition cursor-pointer stroke-slate-900 stroke-2"
                             title={`Pace: ${h.paceStr}`}
+                            vectorEffect="non-scaling-stroke"
                           />
                         </g>
                       );
                     })}
                   </svg>
-                  <div className="absolute bottom-1 w-full flex justify-between text-[9px] text-slate-500 px-1">
+                  <div className="absolute bottom-1 left-10 right-3 flex justify-between text-[9px] text-slate-500">
                     <span>이전</span>
                     <span>최근</span>
                   </div>
                 </div>
                 <div className="mt-2 text-center text-xs font-mono text-slate-300 bg-slate-950 p-2 rounded border border-slate-800">
-                  선형 평균 페이스 범위: <span className="text-orange-400 font-bold">4:30 ~ 7:30 /km</span>
+                  최근 20회 페이스 범위: <span className="text-orange-400 font-bold">{paceChartLabels.fast} ~ {paceChartLabels.slow} /km</span>
                 </div>
               </div>
 
