@@ -154,6 +154,8 @@ export default function App() {
   const [supabaseUrl, setSupabaseUrl] = useState(SUPABASE_URL);
   const [supabaseKey, setSupabaseKey] = useState(SUPABASE_ANON_KEY);
   const [isConnected, setIsConnected] = useState(false);
+  const [dataSource, setDataSource] = useState('loading');
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard'); 
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -167,12 +169,16 @@ export default function App() {
 
   const loadSupabaseActivities = async (url = SUPABASE_URL, key = SUPABASE_ANON_KEY, showAlert = false) => {
     if (!url || !key) {
-      setActivities(generateMockData());
+      setActivities([]);
       setIsConnected(false);
+      setDataSource('error');
+      setLoadError('Vercel 환경변수 VITE_SUPABASE_URL 또는 VITE_SUPABASE_ANON_KEY가 없어 Supabase 데이터를 불러올 수 없습니다.');
       return;
     }
 
     try {
+      setDataSource('loading');
+      setLoadError('');
       const supabase = createClient(url, key);
       const { data, error } = await supabase
         .from(SUPABASE_TABLE)
@@ -183,10 +189,13 @@ export default function App() {
 
       setActivities((data || []).map(normalizeSupabaseActivity));
       setIsConnected(true);
+      setDataSource('supabase');
     } catch (error) {
       console.error('Failed to load Supabase activities:', error);
-      setActivities(generateMockData());
+      setActivities([]);
       setIsConnected(false);
+      setDataSource('error');
+      setLoadError(error?.message || 'Supabase 데이터를 불러오지 못했습니다.');
       if (showAlert) {
         alert('Supabase 데이터를 불러오지 못했습니다. URL, anon key, 테이블 이름, RLS 정책을 확인해주세요.');
       }
@@ -572,19 +581,25 @@ export default function App() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 shadow-lg shadow-orange-600/10"
-            >
-              <span>+ 임의 운동 기록 추가</span>
-            </button>
-          </div>
+          <div className="flex items-center gap-2" />
         </div>
       </header>
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 py-6">
+        {dataSource !== 'supabase' && (
+          <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+            dataSource === 'error'
+              ? 'border-rose-500/40 bg-rose-950/40 text-rose-100'
+              : 'border-amber-500/40 bg-amber-950/30 text-amber-100'
+          }`}>
+            <div className="font-semibold">
+              {dataSource === 'loading' && 'Supabase 데이터를 불러오는 중입니다.'}
+              {dataSource === 'error' && 'Supabase 연결에 실패했습니다.'}
+            </div>
+            {loadError && <div className="mt-1 text-xs opacity-90">{loadError}</div>}
+          </div>
+        )}
 
         {/* Global Filter Bar */}
         <div className="mb-6 p-4 bg-slate-900 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -659,7 +674,7 @@ export default function App() {
                   onClick={handleConnectSupabase}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-lg text-sm transition"
                 >
-                  {isConnected ? '✓ 연결되었습니다 (가상 데이터 대체 활성화)' : 'Supabase 연결 및 동기화'}
+                  {isConnected ? '✓ Supabase 데이터 연결됨' : 'Supabase 연결 및 동기화'}
                 </button>
               </div>
 
