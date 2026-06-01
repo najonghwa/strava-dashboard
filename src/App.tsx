@@ -387,7 +387,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard'); 
   const [dashboardSubTab, setDashboardSubTab] = useState('overview');
   const [showAllSports, setShowAllSports] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [routeSearchTerm, setRouteSearchTerm] = useState('');
 
   // Form states for manually adding test runs
   const [showAddModal, setShowAddModal] = useState(false);
@@ -401,16 +401,25 @@ export default function App() {
 
   const routeActivities = useMemo(() => {
     return activities
-      .filter(activity => activity.raw?.map?.summary_polyline)
-      .slice(0, 12);
+      .filter(activity => activity.raw?.map?.summary_polyline);
   }, [activities]);
+
+  const filteredRouteActivities = useMemo(() => {
+    const keyword = routeSearchTerm.trim().toLowerCase();
+    if (!keyword) return routeActivities;
+    return routeActivities.filter(activity =>
+      String(activity.name || '').toLowerCase().includes(keyword) ||
+      String(activity.device_name || '').toLowerCase().includes(keyword) ||
+      String(formatSportName(activity.sport_type) || '').toLowerCase().includes(keyword)
+    );
+  }, [routeActivities, routeSearchTerm]);
 
   const loadSupabaseActivities = async (url = SUPABASE_URL, key = SUPABASE_ANON_KEY, showAlert = false) => {
     if (!url || !key) {
       setActivities([]);
       setIsConnected(false);
       setDataSource('error');
-      setLoadError('Vercel 환경변수 VITE_SUPABASE_URL 또는 VITE_SUPABASE_ANON_KEY가 없어 Supabase 데이터를 불러올 수 없습니다.');
+      setLoadError('Vercel 환경변수 VITE_SUPABASE_URL 또는 VITE_SUPABASE_ANON_KEY가 없어 DB 데이터를 불러올 수 없습니다.');
       return;
     }
 
@@ -426,13 +435,13 @@ export default function App() {
       setIsConnected(true);
       setDataSource('supabase');
     } catch (error) {
-      console.error('Failed to load Supabase activities:', error);
+      console.error('Failed to load DB activities:', error);
       setActivities([]);
       setIsConnected(false);
       setDataSource('error');
-      setLoadError(error?.message || 'Supabase 데이터를 불러오지 못했습니다.');
+      setLoadError(error?.message || 'DB 데이터를 불러오지 못했습니다.');
       if (showAlert) {
-        alert('Supabase 데이터를 불러오지 못했습니다. URL, anon key, 테이블 이름, RLS 정책을 확인해주세요.');
+        alert('DB 데이터를 불러오지 못했습니다. URL, anon key, 테이블 이름, RLS 정책을 확인해주세요.');
       }
     }
   };
@@ -463,12 +472,9 @@ export default function App() {
   const filteredActivities = useMemo(() => {
     return activities.filter(act => {
       const matchSport = selectedSport === 'All' || act.sport_type === selectedSport;
-      const keyword = searchTerm.toLowerCase();
-      const matchSearch = String(act.name || '').toLowerCase().includes(keyword) || 
-                          String(act.device_name || '').toLowerCase().includes(keyword);
-      return matchSport && matchSearch;
+      return matchSport;
     });
-  }, [activities, selectedSport, searchTerm]);
+  }, [activities, selectedSport]);
 
   // Determine the dynamic active analysis year from loaded activities
   const activeAnalysisYear = useMemo(() => {
@@ -798,7 +804,7 @@ export default function App() {
           id: a.id,
           name: a.name,
           date: new Date(a.start_date_local).toLocaleDateString(),
-          hr: a.average_heartrate,
+          hr: Math.round(a.average_heartrate),
           pace: a.pace_min_per_km,
           paceStr: formatPace(a.pace_min_per_km),
           distance: a.distance_km,
@@ -898,7 +904,9 @@ export default function App() {
         a.sport_type === 'Run' &&
         hasPositiveNumber(a.distance_km) &&
         hasPositiveNumber(a.moving_time) &&
-        hasPositiveNumber(a.pace_min_per_km)
+        hasPositiveNumber(a.pace_min_per_km) &&
+        a.pace_min_per_km >= 3 &&
+        a.pace_min_per_km <= 12
       )
       .sort((a, b) => new Date(b.start_date_local).getTime() - new Date(a.start_date_local).getTime());
 
@@ -924,15 +932,15 @@ export default function App() {
         pace: projectedPace ? `${formatPace(projectedPace)} /km` : 'N/A',
         isNew: best?.id === absoluteNewestRunId,
         raw: best,
-        note: best ? `${best.distance_km.toFixed(1)}km 활동 평균 페이스 기준 추정` : '기록 없음',
+        note: best ? `${best.distance_km.toFixed(1)}km 활동 기준` : '기록 없음',
       };
     };
 
     return [
-      makeRecord('1 km', 1.0, 1.0, 5.0),
-      makeRecord('3 km', 3.0, 3.0, 10.0),
-      makeRecord('5 km', 5.0, 5.0, 15.0),
-      makeRecord('10 km', 10.0, 10.0, 25.0),
+      makeRecord('1 km', 1.0, 0.9, 1.6),
+      makeRecord('3 km', 3.0, 2.8, 3.6),
+      makeRecord('5 km', 5.0, 4.7, 6.0),
+      makeRecord('10 km', 10.0, 9.5, 11.5),
       makeRecord('Half Marathon', 21.0975, 20.5, 23.0),
       makeRecord('Marathon', 42.195, 41.0, 44.5),
     ];
@@ -1016,7 +1024,7 @@ export default function App() {
 
   const handleConnectSupabase = () => {
     if (!supabaseUrl || !supabaseKey) {
-      alert("Supabase URL과 API Key를 입력해주십시오.");
+      alert("DB URL과 API Key를 입력해주십시오.");
       return;
     }
     loadSupabaseActivities(supabaseUrl, supabaseKey, true);
@@ -1030,13 +1038,13 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-orange-500 text-white p-2 rounded-lg font-black tracking-wider flex items-center justify-center">
-              STRAVA+
+              RUN
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-                PULSE RUN <span className="text-xs px-2 py-0.5 bg-orange-500/20 text-orange-400 font-mono rounded">Pro</span>
+                운동 대시보드
               </h1>
-              <p className="text-xs text-slate-400">Garmin & Supabase 연동 개인화 러닝 분석 대시보드</p>
+              <p className="text-xs text-slate-400">Garmin & DB 연동 개인 운동 분석</p>
             </div>
           </div>
 
@@ -1059,7 +1067,7 @@ export default function App() {
               className={`px-4 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${activeTab === 'supabase_guide' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
             >
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Supabase 연동설정
+              DB 연동설정
             </button>
           </div>
 
@@ -1076,8 +1084,8 @@ export default function App() {
               : 'border-amber-500/40 bg-amber-950/30 text-amber-100'
           }`}>
             <div className="font-semibold">
-              {dataSource === 'loading' && 'Supabase 데이터를 불러오는 중입니다.'}
-              {dataSource === 'error' && 'Supabase 연결에 실패했습니다.'}
+              {dataSource === 'loading' && 'DB 데이터를 불러오는 중입니다.'}
+              {dataSource === 'error' && 'DB 연결에 실패했습니다.'}
             </div>
             {loadError && <div className="mt-1 text-xs opacity-90">{loadError}</div>}
           </div>
@@ -1110,34 +1118,24 @@ export default function App() {
             )}
           </div>
 
-          <div className="relative w-full lg:w-64">
-            <input
-              type="text"
-              placeholder="제목, 기기명 검색..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-950 text-sm text-slate-200 pl-9 pr-4 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-orange-500 transition"
-            />
-            <span className="absolute left-3 top-2.5 text-slate-500">🔍</span>
-          </div>
         </div>
 
         {activeTab === 'supabase_guide' && (
           <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 mb-8">
             <div className="flex items-center gap-3 mb-4">
-              <div className="bg-emerald-500 text-slate-950 p-2 rounded-lg font-bold">Supabase</div>
-              <h2 className="text-xl font-bold">내 Supabase 데이터베이스와 연결하기</h2>
+              <div className="bg-emerald-500 text-slate-950 p-2 rounded-lg font-bold">DB</div>
+              <h2 className="text-xl font-bold">내 DB와 연결하기</h2>
             </div>
             <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-              사용 중이신 Supabase 프로젝트의 고유 API 자격 증명을 사용하여 실시간으로 데이터를 로드할 수 있습니다. 
-              수파베이스 내의 테이블 이름이 아래 스키마 구조와 대응하는지 확인해 보십시오.
+              사용 중인 DB 프로젝트의 API 자격 증명을 사용하여 실시간으로 데이터를 로드할 수 있습니다. 
+              DB 테이블 이름이 아래 스키마 구조와 대응하는지 확인해 보십시오.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div className="space-y-4">
                 <h3 className="font-semibold text-orange-400 border-b border-slate-800 pb-2">연동 자격 증명 설정</h3>
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">SUPABASE URL</label>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">DB URL</label>
                   <input
                     type="text"
                     placeholder="https://your-project.supabase.co"
@@ -1147,7 +1145,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">SUPABASE ANON KEY</label>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">DB ANON KEY</label>
                   <input
                     type="password"
                     placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
@@ -1160,12 +1158,12 @@ export default function App() {
                   onClick={handleConnectSupabase}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-lg text-sm transition"
                 >
-                  {isConnected ? '✓ Supabase 데이터 연결됨' : 'Supabase 연결 및 동기화'}
+                  {isConnected ? '✓ DB 데이터 연결됨' : 'DB 연결 및 동기화'}
                 </button>
               </div>
 
               <div className="bg-slate-950 rounded-xl p-4 border border-slate-800">
-                <h3 className="font-semibold text-slate-300 mb-2 text-sm">Supabase 데이터 쿼리 예제 코드 (React)</h3>
+                <h3 className="font-semibold text-slate-300 mb-2 text-sm">DB 데이터 쿼리 예제 코드 (React)</h3>
                 <pre className="text-xs text-indigo-300 bg-slate-900 p-3 rounded-lg overflow-x-auto font-mono leading-relaxed h-48">
 {`import { createClient } from '@supabase/supabase-js'
 
@@ -1189,8 +1187,8 @@ async function fetchUserActivities() {
             </div>
 
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-              <h3 className="font-semibold text-white mb-2 text-sm">✓ Supabase 테이블 권장 스키마 명세</h3>
-              <p className="text-xs text-slate-400 mb-3">현재 대시보드는 아래 필드명이 Supabase DB 테이블에 존재할 때 즉시 최적화 매핑됩니다.</p>
+              <h3 className="font-semibold text-white mb-2 text-sm">✓ DB 테이블 권장 스키마 명세</h3>
+              <p className="text-xs text-slate-400 mb-3">현재 대시보드는 아래 필드명이 DB 테이블에 존재할 때 즉시 최적화 매핑됩니다.</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div className="p-2 bg-slate-900 rounded"><span className="text-slate-500">sport_type</span> <span className="text-slate-300">Run, Ride, Swim</span></div>
                 <div className="p-2 bg-slate-900 rounded"><span className="text-slate-500">distance_km</span> <span className="text-indigo-400">소수점 실수 (km)</span></div>
@@ -1317,6 +1315,70 @@ async function fetchUserActivities() {
             {/* Mid Section: Charts Grid Layout */}
             {dashboardSubTab === 'overview' && (
               <>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs text-slate-400 font-semibold">최근 7일 훈련량</p>
+                    <p className="text-3xl font-black text-orange-400 mt-1">{subscriptionStyleInsights.currentWeekEffort}</p>
+                  </div>
+                  <span className={`text-xs font-bold ${subscriptionStyleInsights.effortChange >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {subscriptionStyleInsights.effortChange >= 0 ? '+' : ''}{subscriptionStyleInsights.effortChange}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">이전 7일 대비 변화입니다.</p>
+              </div>
+
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+                <p className="text-xs text-slate-400 font-semibold">현재 컨디션</p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <p className="text-xl font-black text-cyan-400">{subscriptionStyleInsights.fitness}</p>
+                    <p className="text-[10px] text-slate-500">체력</p>
+                  </div>
+                  <div>
+                    <p className="text-xl font-black text-rose-400">{subscriptionStyleInsights.fatigue}</p>
+                    <p className="text-[10px] text-slate-500">피로</p>
+                  </div>
+                  <div>
+                    <p className="text-xl font-black text-emerald-400">{subscriptionStyleInsights.form}</p>
+                    <p className="text-[10px] text-slate-500">상태</p>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">판정: <span className="text-slate-300 font-semibold">{subscriptionStyleInsights.formLabel}</span></p>
+              </div>
+
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs text-slate-400 font-semibold">이번 달 누적</p>
+                    <p className="text-3xl font-black text-white mt-1">{subscriptionStyleInsights.monthDistance}<span className="text-xs text-slate-500 ml-1">km</span></p>
+                  </div>
+                  <span className={`text-xs font-bold ${subscriptionStyleInsights.monthDistanceChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {subscriptionStyleInsights.monthDistanceChange >= 0 ? '+' : ''}{subscriptionStyleInsights.monthDistanceChange}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">{subscriptionStyleInsights.monthTime}시간 · 상승고도 {subscriptionStyleInsights.monthElevation}m</p>
+              </div>
+
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs text-slate-400 font-semibold">부하 증가율</p>
+                    <p className={`text-3xl font-black mt-1 ${
+                      subscriptionStyleInsights.rampRate > 35 ? 'text-rose-400' :
+                      subscriptionStyleInsights.rampRate > 15 ? 'text-amber-400' :
+                      'text-emerald-400'
+                    }`}>
+                      {subscriptionStyleInsights.rampRate >= 0 ? '+' : ''}{subscriptionStyleInsights.rampRate}%
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-2 py-1">7일 기준</span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">판정: <span className="text-slate-300 font-semibold">{subscriptionStyleInsights.riskLabel}</span></p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
               
               {/* 1. Monthly Distance Bar Chart (SVG-based Interactive) */}
@@ -1431,14 +1493,14 @@ async function fetchUserActivities() {
             <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 mb-6">
               <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-white">구독형 트레이닝 인사이트</h2>
-                  <p className="text-xs text-slate-400 mt-1">Strava Premium의 Relative Effort, Fitness/Freshness, 누적 통계, 페이스 존 개념을 개인 DB 기준으로 근사 계산합니다.</p>
+                  <h2 className="text-lg font-bold text-white">트레이닝 분석</h2>
+                  <p className="text-xs text-slate-400 mt-1">페이스 구간, 반복 코스, 파워, 고도 보정 페이스를 세부적으로 봅니다.</p>
                 </div>
-                <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-2 py-1">공식 Strava 점수와 동일한 산식은 아님</span>
+                <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-2 py-1">개인 기록 기준 요약</span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                <div className="hidden">
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-xs text-slate-400 font-semibold">Relative Effort</p>
@@ -1451,7 +1513,7 @@ async function fetchUserActivities() {
                   <p className="text-[11px] text-slate-500 mt-2">최근 7일 심박/시간 기반 노력량. 이전 7일: {subscriptionStyleInsights.previousWeekEffort}</p>
                 </div>
 
-                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                <div className="hidden">
                   <p className="text-xs text-slate-400 font-semibold">Fitness / Fatigue / Form</p>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                     <div>
@@ -1470,7 +1532,7 @@ async function fetchUserActivities() {
                   <p className="text-[11px] text-slate-500 mt-2">현재 상태: <span className="text-slate-300 font-semibold">{subscriptionStyleInsights.formLabel}</span></p>
                 </div>
 
-                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                <div className="hidden">
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-xs text-slate-400 font-semibold">월간 누적 통계</p>
@@ -1501,7 +1563,7 @@ async function fetchUserActivities() {
                   </div>
                 </div>
 
-                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                <div className="hidden">
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-xs text-slate-400 font-semibold">부하 증가율</p>
@@ -1660,9 +1722,9 @@ async function fetchUserActivities() {
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
                 <div className="flex justify-between items-center mb-1">
                   <h3 className="text-md font-bold text-white">심박수 vs 페이스 분포도</h3>
-                  <span className="text-[10px] text-cyan-400">우하향 = 고효율</span>
+                  <span className="text-[10px] text-cyan-400">최근 러닝</span>
                 </div>
-                <p className="text-xs text-slate-400 mb-4">유산소 러닝 코치용 연관 산점도</p>
+                <p className="text-xs text-slate-400 mb-4">최근 러닝의 평균 심박수와 평균 페이스를 비교합니다.</p>
 
                 {/* Custom Interactive SVG Scatter Plot */}
                 <div className="hidden">
@@ -1715,7 +1777,7 @@ async function fetchUserActivities() {
                   </svg>
                 </div>
                 <div className="mt-2 text-center text-[11px] text-slate-400 leading-tight">
-                  최근 18개 러닝 기준입니다. 오른쪽일수록 심박이 높고, 위쪽일수록 페이스가 빠릅니다. 회색 점은 내리막/특이 페이스 가능성이 큰 기록이라 추세 판단에서는 약하게 봅니다.
+                  오른쪽일수록 심박이 높고, 위쪽일수록 페이스가 빠릅니다.
                 </div>
                 <div className="hidden">
                   점 하나는 1회의 러닝 세션입니다. 동일 심박에서 하단(빠른 페이스)으로 점이 이동할수록 유산소 능력이 발달함을 의미합니다.
@@ -1821,10 +1883,23 @@ async function fetchUserActivities() {
               {/* 8. Personal Best Records (PB) with dynamic new check */}
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
                 <h3 className="text-md font-bold text-white mb-1">개인 최고 기록 (Personal Best)</h3>
-                <p className="text-xs text-slate-400 mb-4">수파베이스 DB에 저장된 기록 중 부문별 자동 감지</p>
+                <p className="text-xs text-slate-400 mb-4">거리별 최고 기록을 확인합니다.</p>
                 <div className="space-y-3">
                   {pbRecords.map((pb, idx) => (
-                    <div key={idx} className="flex justify-between items-center bg-slate-950 p-2.5 rounded-lg border border-slate-850">
+                    <button
+                      key={idx}
+                      disabled={!pb.raw}
+                      onClick={() => {
+                        if (!pb.raw) return;
+                        setSelectedActivity(pb.raw);
+                        if (pb.raw.raw?.map?.summary_polyline) {
+                          setRouteActivity(pb.raw);
+                        }
+                      }}
+                      className={`w-full flex justify-between items-center bg-slate-950 p-2.5 rounded-lg border border-slate-850 text-left transition ${
+                        pb.raw ? 'hover:border-orange-500/70 hover:bg-slate-900 cursor-pointer' : 'cursor-default'
+                      }`}
+                    >
                       <div>
                         <span className="text-xs text-slate-500 font-bold block">{pb.name}</span>
                         <span className="text-sm font-black text-white">{pb.time}</span>
@@ -1842,7 +1917,7 @@ async function fetchUserActivities() {
                       ) : (
                         <span className="text-[10px] text-slate-700">기록 없음</span>
                       )}
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -1909,58 +1984,8 @@ async function fetchUserActivities() {
 
             </div>
 
-            {/* 10. Workout Detail Modal / Route Trace Mock */}
-              </>
-            )}
-
-            {dashboardSubTab === 'routes' && (
-              <>
-            {/* 10. Workout Detail Modal / Route Trace Mock */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* GPS Track Map Visualizer */}
-              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 lg:col-span-2 relative overflow-hidden group">
-                <h3 className="text-md font-bold text-white mb-1">GPS 트랙 시각화</h3>
-                <p className="text-xs text-slate-400 mb-4">Strava summary polyline 기반 실제 활동 경로</p>
-                {routeActivities.length > 0 && (
-                  <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
-                    {routeActivities.map((activity) => (
-                      <button
-                        key={activity.id}
-                        onClick={() => setRouteActivity(activity)}
-                        className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs transition ${
-                          routeActivity?.id === activity.id
-                            ? 'border-orange-500 bg-orange-500/10 text-white'
-                            : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-                        }`}
-                        title={`${activity.name} | ${new Date(activity.start_date_local).toLocaleString('ko-KR')}`}
-                      >
-                        <span className="block font-semibold">{activity.name}</span>
-                        <span className="font-mono text-[10px] opacity-80">{new Date(activity.start_date_local).toLocaleDateString('ko-KR')} · {activity.distance_km.toFixed(1)} km</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {routeActivity && (
-                  <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                    <span className="rounded bg-slate-950 px-2 py-1 text-orange-300">{formatSportName(routeActivity.sport_type)}</span>
-                    <span className="font-semibold text-slate-200">{routeActivity.name}</span>
-                    <span>{new Date(routeActivity.start_date_local).toLocaleString('ko-KR')}</span>
-                  </div>
-                )}
-                
-                <div className="h-72 bg-slate-950 rounded-xl relative flex items-center justify-center overflow-hidden border border-slate-800">
-                  <RouteMap activity={routeActivity} />
-
-                  <div className="absolute bottom-3 left-3 z-10 bg-slate-900/90 backdrop-blur text-[11px] p-3 rounded-lg border border-slate-800 text-slate-300">
-                    <span className="font-bold text-white block">📍 주요 코스 정보</span>
-                    <span>상세 경로가 포함된 가민 FIT 수신 완료</span>
-                  </div>
-                </div>
-              </div>
-
               {/* Workout Calendar Widget */}
-              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
+              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 mb-6">
                 <h3 className="text-md font-bold text-white mb-1">트레이닝 일정 캘린더</h3>
                 <p className="text-xs text-slate-400 mb-3">훈련일수 기반 클릭 시 상세 운동 데이터 팝업</p>
                 
@@ -2006,6 +2031,75 @@ async function fetchUserActivities() {
                 </p>
               </div>
 
+              </>
+            )}
+
+            {dashboardSubTab === 'routes' && (
+              <>
+            {/* 10. Workout Detail Modal / Route Trace Mock */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* GPS Track Map Visualizer */}
+              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 lg:col-span-2 relative overflow-hidden group">
+                <h3 className="text-md font-bold text-white mb-1">운동 경로</h3>
+                <p className="text-xs text-slate-400 mb-4">GPS 기록이 있는 활동의 이동 경로입니다.</p>
+                {routeActivity && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                    <span className="rounded bg-slate-950 px-2 py-1 text-orange-300">{formatSportName(routeActivity.sport_type)}</span>
+                    <span className="font-semibold text-slate-200">{routeActivity.name}</span>
+                    <span>{new Date(routeActivity.start_date_local).toLocaleString('ko-KR')}</span>
+                  </div>
+                )}
+                
+                <div className="h-[420px] bg-slate-950 rounded-xl relative flex items-center justify-center overflow-hidden border border-slate-800">
+                  <RouteMap activity={routeActivity} />
+
+                  <div className="absolute bottom-3 left-3 z-10 bg-slate-900/90 backdrop-blur text-[11px] p-3 rounded-lg border border-slate-800 text-slate-300">
+                    <span className="font-bold text-white block">📍 주요 코스 정보</span>
+                    <span>상세 경로가 포함된 가민 FIT 수신 완료</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
+                <h3 className="text-md font-bold text-white mb-1">경로 활동 목록</h3>
+                <p className="text-xs text-slate-400 mb-4">활동을 누르면 왼쪽 지도 경로가 바뀝니다.</p>
+                <div className="relative mb-3">
+                  <input
+                    type="text"
+                    placeholder="경로 활동 검색..."
+                    value={routeSearchTerm}
+                    onChange={(e) => setRouteSearchTerm(e.target.value)}
+                    className="w-full bg-slate-950 text-sm text-slate-200 pl-9 pr-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-orange-500 transition"
+                  />
+                  <span className="absolute left-3 top-2.5 text-slate-500">🔍</span>
+                </div>
+                <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                  {filteredRouteActivities.length > 0 ? filteredRouteActivities.map((activity) => (
+                    <button
+                      key={activity.id}
+                      onClick={() => setRouteActivity(activity)}
+                      className={`w-full rounded-xl border p-3 text-left transition ${
+                        routeActivity?.id === activity.id
+                          ? 'border-orange-500 bg-orange-500/10 text-white'
+                          : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                      title={`${activity.name} | ${new Date(activity.start_date_local).toLocaleString('ko-KR')}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-orange-300">{formatSportName(activity.sport_type)}</span>
+                        <span className="font-mono text-[10px] text-slate-500">{activity.distance_km.toFixed(1)} km</span>
+                      </div>
+                      <span className="mt-1 block truncate text-sm font-semibold">{activity.name}</span>
+                      <span className="mt-1 block text-[10px] text-slate-500">{new Date(activity.start_date_local).toLocaleString('ko-KR')}</span>
+                    </button>
+                  )) : (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">
+                      {routeActivities.length > 0 ? '검색 결과가 없습니다.' : '표시할 GPS 경로가 있는 활동이 없습니다.'}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
               </>
             )}
@@ -2082,6 +2176,27 @@ async function fetchUserActivities() {
                 </div>
                 <span className="text-emerald-400 font-mono">Garmin Connect Sync OK</span>
               </div>
+
+              {selectedActivity.raw?.map?.summary_polyline && (
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-850">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-400">GPS 경로</span>
+                    <button
+                      onClick={() => {
+                        setRouteActivity(selectedActivity);
+                        setDashboardSubTab('routes');
+                        setSelectedActivity(null);
+                      }}
+                      className="rounded bg-orange-500/10 px-2 py-1 text-[10px] font-bold text-orange-300 hover:bg-orange-500/20"
+                    >
+                      경로 탭에서 보기
+                    </button>
+                  </div>
+                  <div className="h-48 overflow-hidden rounded-lg border border-slate-800">
+                    <RouteMap activity={selectedActivity} />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2183,8 +2298,8 @@ async function fetchUserActivities() {
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950 py-8 mt-12 text-center text-xs text-slate-600">
-        <p>© 2026 PULSE RUN. All Rights Reserved. Powered by Garmin integration, Strava schemas & Supabase database.</p>
-        <p className="mt-1">Designed for elite athletes who inspect every metric in high-fidelity.</p>
+        <p>© 2026 운동 대시보드. Garmin 연동 데이터와 개인 DB 기반 분석.</p>
+        <p className="mt-1">개인 운동 기록을 깔끔하게 확인하기 위한 대시보드입니다.</p>
       </footer>
     </div>
   );
