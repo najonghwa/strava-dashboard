@@ -116,6 +116,26 @@ const formatSportName = (sport) => {
 
 const hasPositiveNumber = (value) => Number.isFinite(value) && value > 0;
 
+const calculateRelativeEffort = (activity) => {
+  if (!hasPositiveNumber(activity.moving_time)) return 0;
+
+  const durationMinutes = activity.moving_time / 60;
+  const hr = activity.average_heartrate;
+  let intensity = 0.7;
+
+  if (hasPositiveNumber(hr)) {
+    if (hr < 125) intensity = 0.7;
+    else if (hr < 143) intensity = 1.0;
+    else if (hr < 160) intensity = 1.7;
+    else if (hr < 175) intensity = 2.6;
+    else intensity = 3.6;
+  } else if (hasPositiveNumber(activity.average_watts)) {
+    intensity = 1.3;
+  }
+
+  return Math.round(durationMinutes * intensity);
+};
+
 const decodePolyline = (encoded = '') => {
   let index = 0;
   let lat = 0;
@@ -489,6 +509,157 @@ export default function App() {
       avgHR: avgRunningHR
     };
   }, [filteredActivities, activities, activeAnalysisYear]);
+
+  const subscriptionStyleInsights = useMemo(() => {
+    const validActivities = activities
+      .filter(a => a.start_date_local && hasPositiveNumber(a.moving_time))
+      .map(a => ({
+        ...a,
+        date: new Date(a.start_date_local),
+        relativeEffort: calculateRelativeEffort(a),
+      }))
+      .filter(a => !Number.isNaN(a.date.getTime()))
+      .sort((a, b) => a.date - b.date);
+
+    if (validActivities.length === 0) {
+      return {
+        currentWeekEffort: 0,
+        previousWeekEffort: 0,
+        effortChange: 0,
+        fitness: 0,
+        fatigue: 0,
+        form: 0,
+        formLabel: '데이터 없음',
+        monthDistance: 0,
+        prevMonthDistance: 0,
+        monthDistanceChange: 0,
+        monthTime: 0,
+        monthElevation: 0,
+        paceZoneEasy: 0,
+        paceZoneSteady: 0,
+        paceZoneHard: 0,
+        rampRate: 0,
+        riskLabel: '데이터 없음',
+        matchedRouteName: 'N/A',
+        matchedRouteLatest: 'N/A',
+        matchedRouteBest: 'N/A',
+        matchedRouteDelta: 0,
+        powerCoverage: 0,
+        avgPower: 0,
+        terrainAdjustedPace: '0:00',
+      };
+    }
+
+    const latestDate = validActivities[validActivities.length - 1].date;
+    const daysBetween = (date) => Math.floor((latestDate - date) / (1000 * 60 * 60 * 24));
+    const currentWeek = validActivities.filter(a => daysBetween(a.date) >= 0 && daysBetween(a.date) < 7);
+    const previousWeek = validActivities.filter(a => daysBetween(a.date) >= 7 && daysBetween(a.date) < 14);
+    const currentWeekEffort = currentWeek.reduce((sum, a) => sum + a.relativeEffort, 0);
+    const previousWeekEffort = previousWeek.reduce((sum, a) => sum + a.relativeEffort, 0);
+    const effortChange = previousWeekEffort > 0
+      ? Math.round(((currentWeekEffort - previousWeekEffort) / previousWeekEffort) * 100)
+      : 0;
+    const priorThreeWeeks = validActivities.filter(a => daysBetween(a.date) >= 7 && daysBetween(a.date) < 28);
+    const priorWeeklyEffort = priorThreeWeeks.reduce((sum, a) => sum + a.relativeEffort, 0) / 3;
+    const rampRate = priorWeeklyEffort > 0
+      ? Math.round(((currentWeekEffort - priorWeeklyEffort) / priorWeeklyEffort) * 100)
+      : 0;
+    const riskLabel = rampRate > 35 ? '부상 위험 높음' : rampRate > 15 ? '부하 증가 주의' : rampRate < -25 ? '회복/감량 주간' : '안정적';
+
+    let fitness = 0;
+    let fatigue = 0;
+    validActivities.forEach((activity) => {
+      fitness = fitness * Math.exp(-1 / 42) + activity.relativeEffort * 0.08;
+      fatigue = fatigue * Math.exp(-1 / 7) + activity.relativeEffort * 0.18;
+    });
+    const roundedFitness = Math.round(fitness);
+    const roundedFatigue = Math.round(fatigue);
+    const form = roundedFitness - roundedFatigue;
+    const formLabel = form >= 8 ? '회복 양호' : form >= -10 ? '훈련 균형' : '피로 누적';
+
+    const currentMonth = latestDate.getMonth();
+    const currentYear = latestDate.getFullYear();
+    const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
+    const prevMonth = prevMonthDate.getMonth();
+    const prevMonthYear = prevMonthDate.getFullYear();
+    const monthActivities = validActivities.filter(a => a.date.getFullYear() === currentYear && a.date.getMonth() === currentMonth);
+    const prevMonthActivities = validActivities.filter(a => a.date.getFullYear() === prevMonthYear && a.date.getMonth() === prevMonth);
+    const monthDistance = monthActivities.reduce((sum, a) => sum + a.distance_km, 0);
+    const prevMonthDistance = prevMonthActivities.reduce((sum, a) => sum + a.distance_km, 0);
+    const monthDistanceChange = prevMonthDistance > 0
+      ? Math.round(((monthDistance - prevMonthDistance) / prevMonthDistance) * 100)
+      : 0;
+
+    const runPaces = validActivities
+      .filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.pace_min_per_km))
+      .map(a => a.pace_min_per_km);
+    const zoneTotal = runPaces.length || 1;
+    const paceZoneEasy = Math.round((runPaces.filter(p => p >= 6.5).length / zoneTotal) * 100);
+    const paceZoneSteady = Math.round((runPaces.filter(p => p >= 5.3 && p < 6.5).length / zoneTotal) * 100);
+    const paceZoneHard = Math.max(0, 100 - paceZoneEasy - paceZoneSteady);
+    const runActivities = validActivities.filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.distance_km) && hasPositiveNumber(a.pace_min_per_km));
+    const terrainPaces = runActivities.map(a => {
+      const climbPerKm = hasPositiveNumber(a.total_elevation_gain) ? a.total_elevation_gain / a.distance_km : 0;
+      const adjustment = Math.min(0.18, climbPerKm * 0.003);
+      return a.pace_min_per_km * (1 - adjustment);
+    });
+    const terrainAdjustedPace = terrainPaces.length
+      ? formatPace(terrainPaces.reduce((sum, pace) => sum + pace, 0) / terrainPaces.length)
+      : '0:00';
+
+    const powerActivities = validActivities.filter(a => hasPositiveNumber(a.average_watts));
+    const powerCoverage = Math.round((powerActivities.length / validActivities.length) * 100);
+    const avgPower = powerActivities.length
+      ? Math.round(powerActivities.reduce((sum, a) => sum + a.average_watts, 0) / powerActivities.length)
+      : 0;
+
+    const routeGroups = {};
+    runActivities.forEach((activity) => {
+      const distanceBucket = Math.round(activity.distance_km * 2) / 2;
+      const key = `${activity.name || 'Run'}-${distanceBucket}`;
+      routeGroups[key] = routeGroups[key] || [];
+      routeGroups[key].push(activity);
+    });
+    const matchedGroup = Object.values(routeGroups)
+      .filter(group => group.length >= 3)
+      .sort((a, b) => b[0].date - a[0].date)[0] || [];
+    const matchedLatest = matchedGroup.length
+      ? [...matchedGroup].sort((a, b) => b.date - a.date)[0]
+      : null;
+    const matchedBest = matchedGroup.length
+      ? [...matchedGroup].sort((a, b) => a.pace_min_per_km - b.pace_min_per_km)[0]
+      : null;
+    const matchedRouteDelta = matchedLatest && matchedBest
+      ? Math.round((matchedLatest.pace_min_per_km - matchedBest.pace_min_per_km) * 60)
+      : 0;
+
+    return {
+      currentWeekEffort,
+      previousWeekEffort,
+      effortChange,
+      fitness: roundedFitness,
+      fatigue: roundedFatigue,
+      form,
+      formLabel,
+      monthDistance: parseFloat(monthDistance.toFixed(1)),
+      prevMonthDistance: parseFloat(prevMonthDistance.toFixed(1)),
+      monthDistanceChange,
+      monthTime: Math.round(monthActivities.reduce((sum, a) => sum + a.moving_time, 0) / 3600),
+      monthElevation: Math.round(monthActivities.reduce((sum, a) => sum + a.total_elevation_gain, 0)),
+      paceZoneEasy,
+      paceZoneSteady,
+      paceZoneHard,
+      rampRate,
+      riskLabel,
+      matchedRouteName: matchedLatest ? `${matchedLatest.name} · ${matchedLatest.distance_km.toFixed(1)}km` : '반복 코스 부족',
+      matchedRouteLatest: matchedLatest ? formatPace(matchedLatest.pace_min_per_km) : 'N/A',
+      matchedRouteBest: matchedBest ? formatPace(matchedBest.pace_min_per_km) : 'N/A',
+      matchedRouteDelta,
+      powerCoverage,
+      avgPower,
+      terrainAdjustedPace,
+    };
+  }, [activities]);
 
   // 1. Monthly Running distance calculation for Active Dynamic Year
   const monthlyDistanceData = useMemo(() => {
@@ -1187,6 +1358,123 @@ async function fetchUserActivities() {
                   </div>
                 </div>
 
+              </div>
+            </div>
+
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 mb-6">
+              <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white">구독형 트레이닝 인사이트</h2>
+                  <p className="text-xs text-slate-400 mt-1">Strava Premium의 Relative Effort, Fitness/Freshness, 누적 통계, 페이스 존 개념을 개인 DB 기준으로 근사 계산합니다.</p>
+                </div>
+                <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-2 py-1">공식 Strava 점수와 동일한 산식은 아님</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-xs text-slate-400 font-semibold">Relative Effort</p>
+                      <p className="text-3xl font-black text-orange-400 mt-1">{subscriptionStyleInsights.currentWeekEffort}</p>
+                    </div>
+                    <span className={`text-xs font-bold ${subscriptionStyleInsights.effortChange >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                      {subscriptionStyleInsights.effortChange >= 0 ? '+' : ''}{subscriptionStyleInsights.effortChange}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-2">최근 7일 심박/시간 기반 노력량. 이전 7일: {subscriptionStyleInsights.previousWeekEffort}</p>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold">Fitness / Fatigue / Form</p>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div>
+                      <p className="text-xl font-black text-cyan-400">{subscriptionStyleInsights.fitness}</p>
+                      <p className="text-[10px] text-slate-500">Fitness</p>
+                    </div>
+                    <div>
+                      <p className="text-xl font-black text-rose-400">{subscriptionStyleInsights.fatigue}</p>
+                      <p className="text-[10px] text-slate-500">Fatigue</p>
+                    </div>
+                    <div>
+                      <p className="text-xl font-black text-emerald-400">{subscriptionStyleInsights.form}</p>
+                      <p className="text-[10px] text-slate-500">Form</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-2">현재 상태: <span className="text-slate-300 font-semibold">{subscriptionStyleInsights.formLabel}</span></p>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-xs text-slate-400 font-semibold">월간 누적 통계</p>
+                      <p className="text-3xl font-black text-white mt-1">{subscriptionStyleInsights.monthDistance}<span className="text-xs text-slate-500 ml-1">km</span></p>
+                    </div>
+                    <span className={`text-xs font-bold ${subscriptionStyleInsights.monthDistanceChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {subscriptionStyleInsights.monthDistanceChange >= 0 ? '+' : ''}{subscriptionStyleInsights.monthDistanceChange}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-2">이번 달 {subscriptionStyleInsights.monthTime}시간 · 상승고도 {subscriptionStyleInsights.monthElevation}m</p>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold mb-3">러닝 페이스 존</p>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="flex justify-between text-[11px] text-slate-400"><span>Easy</span><span>{subscriptionStyleInsights.paceZoneEasy}%</span></div>
+                      <div className="h-2 bg-slate-800 rounded overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${subscriptionStyleInsights.paceZoneEasy}%` }} /></div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[11px] text-slate-400"><span>Steady</span><span>{subscriptionStyleInsights.paceZoneSteady}%</span></div>
+                      <div className="h-2 bg-slate-800 rounded overflow-hidden"><div className="h-full bg-orange-500" style={{ width: `${subscriptionStyleInsights.paceZoneSteady}%` }} /></div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[11px] text-slate-400"><span>Hard</span><span>{subscriptionStyleInsights.paceZoneHard}%</span></div>
+                      <div className="h-2 bg-slate-800 rounded overflow-hidden"><div className="h-full bg-rose-500" style={{ width: `${subscriptionStyleInsights.paceZoneHard}%` }} /></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-xs text-slate-400 font-semibold">부하 증가율</p>
+                      <p className={`text-3xl font-black mt-1 ${
+                        subscriptionStyleInsights.rampRate > 35 ? 'text-rose-400' :
+                        subscriptionStyleInsights.rampRate > 15 ? 'text-amber-400' :
+                        'text-emerald-400'
+                      }`}>
+                        {subscriptionStyleInsights.rampRate >= 0 ? '+' : ''}{subscriptionStyleInsights.rampRate}%
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-2 py-1">7일 vs 이전 3주</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-2">판정: <span className="text-slate-300 font-semibold">{subscriptionStyleInsights.riskLabel}</span></p>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold">Matched Activities</p>
+                  <p className="mt-1 truncate text-sm font-bold text-white">{subscriptionStyleInsights.matchedRouteName}</p>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div><p className="text-sm font-black text-orange-400">{subscriptionStyleInsights.matchedRouteLatest}</p><p className="text-[10px] text-slate-500">최근</p></div>
+                    <div><p className="text-sm font-black text-emerald-400">{subscriptionStyleInsights.matchedRouteBest}</p><p className="text-[10px] text-slate-500">최고</p></div>
+                    <div><p className="text-sm font-black text-slate-200">{subscriptionStyleInsights.matchedRouteDelta >= 0 ? '+' : ''}{subscriptionStyleInsights.matchedRouteDelta}s</p><p className="text-[10px] text-slate-500">차이/km</p></div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold">Power Analysis</p>
+                  <p className="text-3xl font-black text-violet-400 mt-1">{subscriptionStyleInsights.avgPower}<span className="text-xs text-slate-500 ml-1">W</span></p>
+                  <p className="text-[11px] text-slate-500 mt-2">파워 데이터 포함률 {subscriptionStyleInsights.powerCoverage}%</p>
+                  <div className="mt-2 h-2 bg-slate-800 rounded overflow-hidden">
+                    <div className="h-full bg-violet-500" style={{ width: `${subscriptionStyleInsights.powerCoverage}%` }} />
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold">Terrain Adjusted Pace</p>
+                  <p className="text-3xl font-black text-cyan-400 mt-1">{subscriptionStyleInsights.terrainAdjustedPace}<span className="text-xs text-slate-500 ml-1">/km</span></p>
+                  <p className="text-[11px] text-slate-500 mt-2">상승고도를 반영한 평지 환산 페이스 근사값입니다.</p>
+                </div>
               </div>
             </div>
 
