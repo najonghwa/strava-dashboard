@@ -1623,7 +1623,7 @@ async function fetchUserActivities() {
                     <span>{hrPaceLabels.lowHr} bpm</span>
                     <span>{hrPaceLabels.highHr} bpm</span>
                   </div>
-                  <div className="absolute top-2 right-3 text-[9px] text-cyan-400">왼쪽 위일수록 효율적</div>
+                  <div className="absolute top-2 right-3 text-[9px] text-cyan-400">강도 증가 방향 ↗</div>
                   <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
                     {[15, 50, 85].map((y) => (
                       <line key={`hrp-y-${y}`} x1="0" y1={y} x2="100" y2={y} stroke="#1e293b" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
@@ -1631,7 +1631,7 @@ async function fetchUserActivities() {
                     {[10, 50, 90].map((x) => (
                       <line key={`hrp-x-${x}`} x1={x} y1="0" x2={x} y2="100" stroke="#0f172a" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
                     ))}
-                    <line x1="10" y1="15" x2="90" y2="85" stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
+                    <line x1="10" y1="85" x2="90" y2="15" stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
                     {hrVsPacePoints.map((pt, idx) => (
                       <circle
                         key={idx}
@@ -1648,7 +1648,7 @@ async function fetchUserActivities() {
                   </svg>
                 </div>
                 <div className="mt-2 text-center text-[11px] text-slate-400 leading-tight">
-                  가로축은 평균 심박, 세로축은 페이스입니다. 왼쪽 위에 가까울수록 낮은 심박으로 빠르게 달린 효율적인 기록입니다.
+                  점 하나는 최근 러닝 중 심박과 페이스가 있는 기록입니다. 오른쪽일수록 심박이 높고, 위쪽일수록 페이스가 빠릅니다. 같은 심박에서 더 위에 있으면 더 효율적인 기록입니다.
                 </div>
                 <div className="hidden">
                   점 하나는 1회의 러닝 세션입니다. 동일 심박에서 하단(빠른 페이스)으로 점이 이동할수록 유산소 능력이 발달함을 의미합니다.
