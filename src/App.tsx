@@ -385,6 +385,8 @@ export default function App() {
   const [dataSource, setDataSource] = useState('loading');
   const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard'); 
+  const [dashboardSubTab, setDashboardSubTab] = useState('overview');
+  const [showAllSports, setShowAllSports] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
   // Form states for manually adding test runs
@@ -730,6 +732,14 @@ export default function App() {
     return ['All', ...sportRatio.map(item => item.name)];
   }, [sportRatio]);
 
+  const visibleSportFilterOptions = useMemo(() => {
+    if (showAllSports || sportFilterOptions.length <= 7) return sportFilterOptions;
+    const primaryOptions = sportFilterOptions.slice(0, 7);
+    return selectedSport !== 'All' && !primaryOptions.includes(selectedSport)
+      ? [...primaryOptions, selectedSport]
+      : primaryOptions;
+  }, [showAllSports, sportFilterOptions, selectedSport]);
+
   // 4. Pace Progression over time (Running Only)
   const paceHistory = useMemo(() => {
     return activities
@@ -883,30 +893,48 @@ export default function App() {
 
   // 8. Personal Bests (PBs) Tracking
   const pbRecords = useMemo(() => {
-    const runs = activities.filter(a => a.sport_type === 'Run');
-    
-    const getBest = (targetDist, tolerance = 0.5) => {
-      const candidates = runs.filter(r => Math.abs(r.distance_km - targetDist) <= tolerance);
-      if (!candidates.length) return null;
-      return candidates.sort((a, b) => a.pace_min_per_km - b.pace_min_per_km)[0];
-    };
-
-    const pb1k = getBest(1.0, 0.2);
-    const pb3k = getBest(3.0, 0.4);
-    const pb5k = getBest(5.0, 0.5);
-    const pb10k = getBest(10.0, 0.8);
-    const pbHalf = getBest(21.1, 1.5);
-    const pbMarathon = getBest(42.195, 2.0);
+    const runs = activities
+      .filter(a =>
+        a.sport_type === 'Run' &&
+        hasPositiveNumber(a.distance_km) &&
+        hasPositiveNumber(a.moving_time) &&
+        hasPositiveNumber(a.pace_min_per_km)
+      )
+      .sort((a, b) => new Date(b.start_date_local).getTime() - new Date(a.start_date_local).getTime());
 
     const absoluteNewestRunId = runs[0]?.id;
 
+    const getBest = (targetDist: number, maxEligibleDist: number) => {
+      const candidates = runs.filter(r => r.distance_km >= targetDist && r.distance_km <= maxEligibleDist);
+      if (!candidates.length) return null;
+      return [...candidates].sort((a, b) => {
+        const aPace = a.moving_time / a.distance_km;
+        const bPace = b.moving_time / b.distance_km;
+        return aPace - bPace;
+      })[0];
+    };
+
+    const makeRecord = (name: string, targetDist: number, maxEligibleDist: number) => {
+      const best = getBest(targetDist, maxEligibleDist);
+      const projectedSeconds = best ? best.moving_time * (targetDist / best.distance_km) : null;
+      const projectedPace = projectedSeconds ? projectedSeconds / 60 / targetDist : null;
+      return {
+        name,
+        time: projectedSeconds ? formatDuration(projectedSeconds) : 'N/A',
+        pace: projectedPace ? `${formatPace(projectedPace)} /km` : 'N/A',
+        isNew: best?.id === absoluteNewestRunId,
+        raw: best,
+        note: best ? `${best.distance_km.toFixed(1)}km 활동 평균 페이스 기준 추정` : '기록 없음',
+      };
+    };
+
     return [
-      { name: '1 km', time: pb1k ? formatPace(pb1k.pace_min_per_km) : 'N/A', isNew: pb1k?.id === absoluteNewestRunId, raw: pb1k },
-      { name: '3 km', time: pb3k ? formatDuration(pb3k.moving_time * (3 / pb3k.distance_km)) : 'N/A', isNew: pb3k?.id === absoluteNewestRunId, raw: pb3k },
-      { name: '5 km', time: pb5k ? formatDuration(pb5k.moving_time * (5 / pb5k.distance_km)) : 'N/A', isNew: pb5k?.id === absoluteNewestRunId, raw: pb5k },
-      { name: '10 km', time: pb10k ? formatDuration(pb10k.moving_time * (10 / pb10k.distance_km)) : 'N/A', isNew: pb10k?.id === absoluteNewestRunId, raw: pb10k },
-      { name: '하프 마라톤', time: pbHalf ? formatDuration(pbHalf.moving_time * (21.1 / pbHalf.distance_km)) : 'N/A', isNew: pbHalf?.id === absoluteNewestRunId, raw: pbHalf },
-      { name: '풀코스', time: pbMarathon ? formatDuration(pbMarathon.moving_time * (42.195 / pbMarathon.distance_km)) : 'N/A', isNew: pbMarathon?.id === absoluteNewestRunId, raw: pbMarathon },
+      makeRecord('1 km', 1.0, 5.0),
+      makeRecord('3 km', 3.0, 10.0),
+      makeRecord('5 km', 5.0, 15.0),
+      makeRecord('10 km', 10.0, 25.0),
+      makeRecord('Half Marathon', 21.1, 30.0),
+      makeRecord('Marathon', 42.195, 50.0),
     ];
   }, [activities]);
 
@@ -1056,10 +1084,10 @@ export default function App() {
         )}
 
         {/* Global Filter Bar */}
-        <div className="mb-6 p-4 bg-slate-900 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">운동 종목 필터</span>
-            {sportFilterOptions.map((sport) => (
+        <div className="mb-6 p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <span className="mr-1 text-xs font-bold uppercase tracking-wider text-slate-500">운동 종목</span>
+            {visibleSportFilterOptions.map((sport) => (
               <button
                 key={sport}
                 onClick={() => setSelectedSport(sport)}
@@ -1069,12 +1097,20 @@ export default function App() {
                     : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
                 }`}
               >
-                {sport === 'All' ? '전체 보기' : formatSportName(sport)}
+                {sport === 'All' ? '전체' : formatSportName(sport)}
               </button>
             ))}
+            {sportFilterOptions.length > 7 && (
+              <button
+                onClick={() => setShowAllSports(!showAllSports)}
+                className="rounded-full bg-slate-950 px-3 py-1 text-xs font-bold text-slate-300 border border-slate-800 hover:border-slate-600 hover:text-white transition"
+              >
+                {showAllSports ? '접기' : `+${sportFilterOptions.length - 7}`}
+              </button>
+            )}
           </div>
 
-          <div className="relative w-full md:w-64">
+          <div className="relative w-full lg:w-64">
             <input
               type="text"
               placeholder="제목, 기기명 검색..."
@@ -1257,7 +1293,30 @@ async function fetchUserActivities() {
               </div>
             </div>
 
+            <div className="mb-6 flex flex-wrap gap-2 rounded-xl border border-slate-800 bg-slate-900 p-2">
+              {[
+                { id: 'overview', label: '요약' },
+                { id: 'analysis', label: '분석' },
+                { id: 'records', label: '기록' },
+                { id: 'routes', label: '경로' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setDashboardSubTab(tab.id)}
+                  className={`rounded-lg px-4 py-2 text-sm font-bold transition ${
+                    dashboardSubTab === tab.id
+                      ? 'bg-orange-500 text-white shadow'
+                      : 'bg-slate-950 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
             {/* Mid Section: Charts Grid Layout */}
+            {dashboardSubTab === 'overview' && (
+              <>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
               
               {/* 1. Monthly Distance Bar Chart (SVG-based Interactive) */}
@@ -1364,7 +1423,11 @@ async function fetchUserActivities() {
 
               </div>
             </div>
+              </>
+            )}
 
+            {dashboardSubTab === 'analysis' && (
+              <>
             <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 mb-6">
               <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-4">
                 <div>
@@ -1747,6 +1810,12 @@ async function fetchUserActivities() {
             </div>
 
             {/* PB Board & Weekly Calendar Matrix Row */}
+              </>
+            )}
+
+            {dashboardSubTab === 'records' && (
+              <>
+            {/* PB Board & Weekly Calendar Matrix Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
               
               {/* 8. Personal Best Records (PB) with dynamic new check */}
@@ -1759,6 +1828,8 @@ async function fetchUserActivities() {
                       <div>
                         <span className="text-xs text-slate-500 font-bold block">{pb.name}</span>
                         <span className="text-sm font-black text-white">{pb.time}</span>
+                        <span className="text-xs font-bold text-orange-400 ml-2">{pb.pace}</span>
+                        <span className="text-[10px] text-slate-500 block mt-0.5">{pb.note}</span>
                       </div>
                       {pb.isNew ? (
                         <span className="bg-orange-500 text-slate-950 text-[10px] font-extrabold px-2 py-1 rounded animate-pulse">
@@ -1838,6 +1909,12 @@ async function fetchUserActivities() {
 
             </div>
 
+            {/* 10. Workout Detail Modal / Route Trace Mock */}
+              </>
+            )}
+
+            {dashboardSubTab === 'routes' && (
+              <>
             {/* 10. Workout Detail Modal / Route Trace Mock */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
@@ -1930,6 +2007,8 @@ async function fetchUserActivities() {
               </div>
 
             </div>
+              </>
+            )}
           </div>
         )}
 
