@@ -6,6 +6,8 @@ import 'leaflet/dist/leaflet.css';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const SUPABASE_TABLE = import.meta.env.VITE_SUPABASE_TABLE || 'activities';
+const SETTINGS_TABLE = 'dashboard_settings';
+const SETTINGS_ID = 'default';
 
 const toNumber = (value, fallback = 0) => {
   if (value === null || value === undefined || value === '') return fallback;
@@ -377,8 +379,14 @@ export default function App() {
   const [activities, setActivities] = useState([]);
   const [selectedSport, setSelectedSport] = useState('All');
   const [selectedActivity, setSelectedActivity] = useState(null);
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
+  const [calendarModalActivity, setCalendarModalActivity] = useState(null);
   const [routeActivity, setRouteActivity] = useState(null);
   const [yearlyGoal, setYearlyGoal] = useState(1000);
+  const [monthlyGoal, setMonthlyGoal] = useState(100);
+  const [goalDraft, setGoalDraft] = useState('1000');
+  const [monthlyGoalDraft, setMonthlyGoalDraft] = useState('100');
+  const [goalSaveStatus, setGoalSaveStatus] = useState('');
   const [supabaseUrl, setSupabaseUrl] = useState(SUPABASE_URL);
   const [supabaseKey, setSupabaseKey] = useState(SUPABASE_ANON_KEY);
   const [isConnected, setIsConnected] = useState(false);
@@ -388,6 +396,10 @@ export default function App() {
   const [dashboardSubTab, setDashboardSubTab] = useState('overview');
   const [showAllSports, setShowAllSports] = useState(false);
   const [routeSearchTerm, setRouteSearchTerm] = useState('');
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   // Form states for manually adding test runs
   const [showAddModal, setShowAddModal] = useState(false);
@@ -429,6 +441,25 @@ export default function App() {
       const supabase = createClient(url, key);
       const data = await fetchAllSupabaseActivities(supabase);
       const normalizedActivities = (data || []).map(normalizeSupabaseActivity);
+      const { data: settingsData, error: settingsError } = await supabase
+        .from(SETTINGS_TABLE)
+        .select('yearly_goal, monthly_goal')
+        .eq('id', SETTINGS_ID)
+        .maybeSingle();
+
+      if (!settingsError && settingsData) {
+        const savedGoal = Number(settingsData.yearly_goal);
+        if (Number.isFinite(savedGoal) && savedGoal > 0) {
+          setYearlyGoal(savedGoal);
+          setGoalDraft(String(savedGoal));
+          const savedMonthlyGoal = Number(settingsData.monthly_goal);
+          if (Number.isFinite(savedMonthlyGoal) && savedMonthlyGoal > 0) {
+            setMonthlyGoal(savedMonthlyGoal);
+            setMonthlyGoalDraft(String(savedMonthlyGoal));
+          }
+          setGoalSaveStatus('저장된 목표를 불러왔습니다.');
+        }
+      }
 
       setActivities(normalizedActivities);
       setRouteActivity(normalizedActivities.find(activity => activity.raw?.map?.summary_polyline) || normalizedActivities[0] || null);
@@ -722,6 +753,39 @@ export default function App() {
     }
     return weeks;
   }, [activities]);
+
+  const calendarCells = useMemo(() => {
+    const [year, month] = calendarMonth.split('-').map(Number);
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay = new Date(year, month, 0);
+    const leadingEmptyDays = firstDay.getDay();
+    const totalCells = Math.ceil((leadingEmptyDays + lastDay.getDate()) / 7) * 7;
+
+    return Array(totalCells).fill(null).map((_, idx) => {
+      const dayNum = idx - leadingEmptyDays + 1;
+      if (dayNum < 1 || dayNum > lastDay.getDate()) {
+        return { date: null, activities: [] };
+      }
+
+      const date = new Date(year, month - 1, dayNum);
+      const dayActivities = activities.filter(a => {
+        const activityDate = new Date(a.start_date_local);
+        return activityDate.getFullYear() === year &&
+          activityDate.getMonth() === month - 1 &&
+          activityDate.getDate() === dayNum;
+      });
+
+      return {
+        date,
+        activities: dayActivities,
+      };
+    });
+  }, [activities, calendarMonth]);
+
+  const calendarMonthLabel = useMemo(() => {
+    const [year, month] = calendarMonth.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' });
+  }, [calendarMonth]);
 
   // 3. Sport Type ratio calculation
   const sportRatio = useMemo(() => {
@@ -1030,6 +1094,74 @@ export default function App() {
     loadSupabaseActivities(supabaseUrl, supabaseKey, true);
   };
 
+  const handleSaveYearlyGoal = async () => {
+    const nextGoal = Number(goalDraft);
+    if (!Number.isFinite(nextGoal) || nextGoal <= 0) {
+      setGoalSaveStatus('1 이상의 숫자를 입력해주세요.');
+      return;
+    }
+
+    if (!supabaseUrl || !supabaseKey) {
+      setYearlyGoal(nextGoal);
+      setGoalSaveStatus('DB 연결 정보가 없어 화면에만 반영되었습니다.');
+      return;
+    }
+
+    try {
+      setGoalSaveStatus('저장 중...');
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const { error } = await supabase
+        .from(SETTINGS_TABLE)
+        .upsert({
+          id: SETTINGS_ID,
+          yearly_goal: nextGoal,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      setYearlyGoal(nextGoal);
+      setGoalSaveStatus('DB에 저장되었습니다.');
+    } catch (error) {
+      console.error('Failed to save yearly goal:', error);
+      setGoalSaveStatus('저장 실패: dashboard_settings 테이블과 권한을 확인해주세요.');
+    }
+  };
+
+  const handleSaveMonthlyGoal = async () => {
+    const nextGoal = Number(monthlyGoalDraft);
+    if (!Number.isFinite(nextGoal) || nextGoal <= 0) {
+      setGoalSaveStatus('월간 목표는 1 이상의 숫자로 입력해주세요.');
+      return;
+    }
+
+    if (!supabaseUrl || !supabaseKey) {
+      setMonthlyGoal(nextGoal);
+      setGoalSaveStatus('DB 연결 정보가 없어 화면에만 반영되었습니다.');
+      return;
+    }
+
+    try {
+      setGoalSaveStatus('저장 중...');
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const { error } = await supabase
+        .from(SETTINGS_TABLE)
+        .upsert({
+          id: SETTINGS_ID,
+          monthly_goal: nextGoal,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      setMonthlyGoal(nextGoal);
+      setGoalSaveStatus('월간 목표가 DB에 저장되었습니다.');
+    } catch (error) {
+      console.error('Failed to save monthly goal:', error);
+      setGoalSaveStatus('저장 실패: dashboard_settings 테이블과 권한을 확인해주세요.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
       
@@ -1037,14 +1169,14 @@ export default function App() {
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-orange-500 text-white p-2 rounded-lg font-black tracking-wider flex items-center justify-center">
-              RUN
+            <div className="bg-orange-500 text-white px-3 py-2 rounded-lg font-black tracking-wider flex items-center justify-center">
+              LOG
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-                운동 대시보드
+              <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
+                Training Dashboard
               </h1>
-              <p className="text-xs text-slate-400">Garmin & DB 연동 개인 운동 분석</p>
+              <p className="text-xs text-slate-400">개인 운동 기록과 훈련 흐름을 한눈에 확인합니다</p>
             </div>
           </div>
 
@@ -1195,6 +1327,20 @@ async function fetchUserActivities() {
                 <div className="p-2 bg-slate-900 rounded"><span className="text-slate-500">moving_time</span> <span className="text-indigo-400">정수 (초)</span></div>
                 <div className="p-2 bg-slate-900 rounded"><span className="text-slate-500">average_heartrate</span> <span className="text-rose-400">평균심박 (bpm)</span></div>
               </div>
+              <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900 p-3">
+                <p className="text-xs font-bold text-slate-300">연간 목표 저장용 테이블</p>
+                <pre className="mt-2 overflow-x-auto rounded bg-slate-950 p-3 text-[11px] text-indigo-300">
+{`create table if not exists dashboard_settings (
+  id text primary key,
+  yearly_goal numeric not null default 1000,
+  monthly_goal numeric not null default 100,
+  updated_at timestamptz default now()
+);
+
+alter table dashboard_settings
+add column if not exists monthly_goal numeric not null default 100;`}
+                </pre>
+              </div>
             </div>
           </div>
         )}
@@ -1291,23 +1437,23 @@ async function fetchUserActivities() {
               </div>
             </div>
 
-            <div className="mb-6 flex flex-wrap gap-2 rounded-xl border border-slate-800 bg-slate-900 p-2">
+            <div className="mb-6 grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-2 shadow-lg shadow-black/10 md:flex md:flex-wrap">
               {[
-                { id: 'overview', label: '요약' },
-                { id: 'analysis', label: '분석' },
-                { id: 'records', label: '기록' },
-                { id: 'routes', label: '경로' },
+                { id: 'overview', label: '요약', icon: '📊' },
+                { id: 'analysis', label: '분석', icon: '📈' },
+                { id: 'records', label: '기록', icon: '🏅' },
+                { id: 'routes', label: '경로', icon: '🗺️' },
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setDashboardSubTab(tab.id)}
-                  className={`rounded-lg px-4 py-2 text-sm font-bold transition ${
+                  className={`rounded-xl px-4 py-3 text-sm font-black transition ${
                     dashboardSubTab === tab.id
-                      ? 'bg-orange-500 text-white shadow'
-                      : 'bg-slate-950 text-slate-400 hover:text-white'
+                      ? 'bg-orange-500 text-white shadow shadow-orange-950/40'
+                      : 'bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white'
                   }`}
                 >
-                  {tab.label}
+                  <span className="mr-1.5">{tab.icon}</span>{tab.label}
                 </button>
               ))}
             </div>
@@ -1376,6 +1522,47 @@ async function fetchUserActivities() {
                   <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-2 py-1">7일 기준</span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-2">판정: <span className="text-slate-300 font-semibold">{subscriptionStyleInsights.riskLabel}</span></p>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 mb-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <p className="text-xs text-slate-400 font-semibold">월간 목표</p>
+                  <p className="text-2xl font-black text-white mt-1">
+                    {subscriptionStyleInsights.monthDistance}
+                    <span className="text-xs text-slate-500 ml-1">/ {monthlyGoal} km</span>
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[180px]">
+                  <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                    <span>이번 달 달성률</span>
+                    <span>{Math.round((subscriptionStyleInsights.monthDistance / monthlyGoal) * 100)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-cyan-400"
+                      style={{ width: `${Math.min((subscriptionStyleInsights.monthDistance / monthlyGoal) * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={monthlyGoalDraft}
+                    onChange={(e) => setMonthlyGoalDraft(e.target.value)}
+                    className="w-24 text-center bg-slate-950 border border-slate-800 text-xs rounded p-1 text-slate-300"
+                    title="월간 목표 km"
+                  />
+                  <button
+                    onClick={handleSaveMonthlyGoal}
+                    className="rounded bg-cyan-500 px-3 py-1 text-xs font-bold text-slate-950 hover:bg-cyan-400"
+                  >
+                    저장
+                  </button>
+                  <span className="text-xs text-slate-500 self-center">km</span>
+                </div>
               </div>
             </div>
 
@@ -1471,16 +1658,26 @@ async function fetchUserActivities() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <input
                       type="number"
-                      value={yearlyGoal}
-                      onChange={(e) => setYearlyGoal(Math.max(1, parseInt(e.target.value) || 1000))}
+                      min="1"
+                      value={goalDraft}
+                      onChange={(e) => setGoalDraft(e.target.value)}
                       className="w-24 text-center bg-slate-950 border border-slate-800 text-xs rounded p-1 text-slate-300"
                       title="목표 킬로미터 조정"
                     />
-                    <span className="text-xs text-slate-500 self-center">km 연간 목표 수동 수정</span>
+                    <button
+                      onClick={handleSaveYearlyGoal}
+                      className="rounded bg-orange-500 px-3 py-1 text-xs font-bold text-white hover:bg-orange-400"
+                    >
+                      저장
+                    </button>
+                    <span className="text-xs text-slate-500 self-center">km 연간 목표</span>
                   </div>
+                  {goalSaveStatus && (
+                    <p className="mt-2 text-[10px] text-slate-500">{goalSaveStatus}</p>
+                  )}
                 </div>
 
               </div>
@@ -1986,48 +2183,61 @@ async function fetchUserActivities() {
 
               {/* Workout Calendar Widget */}
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 mb-6">
-                <h3 className="text-md font-bold text-white mb-1">트레이닝 일정 캘린더</h3>
-                <p className="text-xs text-slate-400 mb-3">훈련일수 기반 클릭 시 상세 운동 데이터 팝업</p>
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-md font-bold text-white mb-1">트레이닝 일정 캘린더</h3>
+                    <p className="text-xs text-slate-400">{calendarMonthLabel} 운동 기록</p>
+                  </div>
+                  <input
+                    type="month"
+                    value={calendarMonth}
+                    onChange={(e) => setCalendarMonth(e.target.value)}
+                    className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-orange-500 sm:w-40"
+                  />
+                </div>
                 
-                {/* Mini Workout Calendar */}
                 <div className="grid grid-cols-7 gap-1 text-center text-xs font-mono">
                   {['일','월','화','수','목','금','토'].map(d => (
                     <span key={d} className="text-slate-500 font-bold py-1">{d}</span>
                   ))}
-                  {Array(35).fill(null).map((_, idx) => {
-                    const dayNum = idx - 3; 
-                    const isDay = dayNum > 0 && dayNum <= 31;
-                    
-                    const dayAct = isDay && activities.find(a => {
-                      const d = new Date(a.start_date_local);
-                      return d.getMonth() === 4 && d.getDate() === dayNum && d.getFullYear() === activeAnalysisYear;
-                    });
+                  {calendarCells.map((cell, idx) => {
+                    const hasActivities = cell.activities.length > 0;
+                    const totalDistance = cell.activities.reduce((sum, activity) => sum + activity.distance_km, 0);
 
                     return (
-                      <div
+                      <button
                         key={idx}
+                        type="button"
+                        disabled={!cell.date}
                         onClick={() => {
-                          if (dayAct) {
-                            setRouteActivity(dayAct);
-                            setSelectedActivity(dayAct);
+                          if (hasActivities) {
+                            const firstRoute = cell.activities.find(activity => activity.raw?.map?.summary_polyline);
+                            setSelectedCalendarDay(cell);
+                            setCalendarModalActivity(firstRoute || cell.activities[0]);
                           }
                         }}
-                        className={`h-9 flex flex-col items-center justify-center rounded-lg transition-all ${
-                          isDay ? 'bg-slate-950/40 border border-slate-850 cursor-pointer' : 'text-transparent'
-                        } ${dayAct ? 'border-orange-500 bg-orange-950/20 hover:bg-orange-950/40' : ''}`}
+                        className={`min-h-14 rounded-lg border p-1.5 text-left transition-all ${
+                          cell.date ? 'bg-slate-950/40 border-slate-850' : 'border-transparent text-transparent'
+                        } ${hasActivities ? 'border-orange-500 bg-orange-950/20 hover:bg-orange-950/40 cursor-pointer' : 'text-slate-600'}`}
                       >
-                        {isDay && (
+                        {cell.date && (
                           <>
-                            <span className={`text-[10px] ${dayAct ? 'font-bold text-orange-400' : 'text-slate-400'}`}>{dayNum}</span>
-                            {dayAct && <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>}
+                            <span className={`block text-[11px] ${hasActivities ? 'font-bold text-orange-300' : 'text-slate-500'}`}>
+                              {cell.date.getDate()}
+                            </span>
+                            {hasActivities && (
+                              <span className="mt-1 block text-[10px] font-semibold text-slate-300">
+                                {cell.activities.length}회 · {totalDistance.toFixed(1)}km
+                              </span>
+                            )}
                           </>
                         )}
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
                 <p className="text-[10px] text-slate-500 text-center mt-3 leading-relaxed">
-                  주황색 포인트가 있는 날짜를 클릭하면 해당 운동 정보가 아래 상세 팝업창에 활성화됩니다.
+                  운동이 있는 날짜를 누르면 그날의 기록과 경로를 팝업으로 확인할 수 있습니다.
                 </p>
               </div>
 
@@ -2107,6 +2317,111 @@ async function fetchUserActivities() {
         )}
 
       </main>
+
+      {/* Calendar Day Detail Popup */}
+      {selectedCalendarDay && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-2xl max-w-4xl w-full border border-slate-800 overflow-hidden shadow-2xl">
+            <div className="p-5 border-b border-slate-850 flex justify-between items-start">
+              <div>
+                <h3 className="text-lg font-bold text-white">
+                  {selectedCalendarDay.date?.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  총 {selectedCalendarDay.activities.length}개 활동 · {selectedCalendarDay.activities.reduce((sum, activity) => sum + activity.distance_km, 0).toFixed(1)}km
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedCalendarDay(null);
+                  setCalendarModalActivity(null);
+                }}
+                className="text-slate-400 hover:text-white bg-slate-950 p-1.5 rounded-lg border border-slate-800 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-5">
+              <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                {selectedCalendarDay.activities.map((activity) => (
+                  <button
+                    key={activity.id}
+                    onClick={() => setCalendarModalActivity(activity)}
+                    className={`w-full rounded-xl border p-3 text-left transition ${
+                      calendarModalActivity?.id === activity.id
+                        ? 'border-orange-500 bg-orange-500/10 text-white'
+                        : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-orange-300">{formatSportName(activity.sport_type)}</span>
+                      <span className="font-mono text-[10px] text-slate-500">{activity.distance_km.toFixed(1)} km</span>
+                    </div>
+                    <span className="mt-1 block truncate text-sm font-semibold">{activity.name}</span>
+                    <span className="mt-1 block text-[10px] text-slate-500">{new Date(activity.start_date_local).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="lg:col-span-2 space-y-4">
+                {calendarModalActivity && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                      <span className="text-[10px] text-slate-500">거리</span>
+                      <p className="text-lg font-black text-white">{calendarModalActivity.distance_km.toFixed(1)}km</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                      <span className="text-[10px] text-slate-500">시간</span>
+                      <p className="text-lg font-black text-white">{formatDuration(calendarModalActivity.moving_time)}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                      <span className="text-[10px] text-slate-500">페이스</span>
+                      <p className="text-lg font-black text-orange-400">{formatPace(calendarModalActivity.pace_min_per_km)}/km</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                      <span className="text-[10px] text-slate-500">심박</span>
+                      <p className="text-lg font-black text-rose-400">{calendarModalActivity.average_heartrate ? Math.round(calendarModalActivity.average_heartrate) : '-'} bpm</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="h-72 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+                  <RouteMap activity={calendarModalActivity} />
+                </div>
+
+                {calendarModalActivity && (
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => {
+                        setSelectedActivity(calendarModalActivity);
+                        setSelectedCalendarDay(null);
+                        setCalendarModalActivity(null);
+                      }}
+                      className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white"
+                    >
+                      상세 기록 보기
+                    </button>
+                    {calendarModalActivity.raw?.map?.summary_polyline && (
+                      <button
+                        onClick={() => {
+                          setRouteActivity(calendarModalActivity);
+                          setDashboardSubTab('routes');
+                          setSelectedCalendarDay(null);
+                          setCalendarModalActivity(null);
+                        }}
+                        className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-bold text-white hover:bg-orange-400"
+                      >
+                        경로 탭에서 보기
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Selected Workout Detail Panel Popups */}
       {selectedActivity && (
