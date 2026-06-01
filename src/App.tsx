@@ -904,8 +904,8 @@ export default function App() {
 
     const absoluteNewestRunId = runs[0]?.id;
 
-    const getBest = (targetDist: number, maxEligibleDist: number) => {
-      const candidates = runs.filter(r => r.distance_km >= targetDist && r.distance_km <= maxEligibleDist);
+    const getBest = (targetDist: number, minEligibleDist: number, maxEligibleDist: number) => {
+      const candidates = runs.filter(r => r.distance_km >= minEligibleDist && r.distance_km <= maxEligibleDist);
       if (!candidates.length) return null;
       return [...candidates].sort((a, b) => {
         const aPace = a.moving_time / a.distance_km;
@@ -914,8 +914,8 @@ export default function App() {
       })[0];
     };
 
-    const makeRecord = (name: string, targetDist: number, maxEligibleDist: number) => {
-      const best = getBest(targetDist, maxEligibleDist);
+    const makeRecord = (name: string, targetDist: number, minEligibleDist: number, maxEligibleDist: number) => {
+      const best = getBest(targetDist, minEligibleDist, maxEligibleDist);
       const projectedSeconds = best ? best.moving_time * (targetDist / best.distance_km) : null;
       const projectedPace = projectedSeconds ? projectedSeconds / 60 / targetDist : null;
       return {
@@ -929,12 +929,12 @@ export default function App() {
     };
 
     return [
-      makeRecord('1 km', 1.0, 5.0),
-      makeRecord('3 km', 3.0, 10.0),
-      makeRecord('5 km', 5.0, 15.0),
-      makeRecord('10 km', 10.0, 25.0),
-      makeRecord('Half Marathon', 21.1, 30.0),
-      makeRecord('Marathon', 42.195, 50.0),
+      makeRecord('1 km', 1.0, 1.0, 5.0),
+      makeRecord('3 km', 3.0, 3.0, 10.0),
+      makeRecord('5 km', 5.0, 5.0, 15.0),
+      makeRecord('10 km', 10.0, 10.0, 25.0),
+      makeRecord('Half Marathon', 21.0975, 20.5, 23.0),
+      makeRecord('Marathon', 42.195, 41.0, 44.5),
     ];
   }, [activities]);
 
