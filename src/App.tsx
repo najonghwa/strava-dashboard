@@ -780,9 +780,10 @@ export default function App() {
   const hrVsPacePoints = useMemo(() => {
     const points = activities
       .filter(a => a.sport_type === 'Run' && hasPositiveNumber(a.average_heartrate) && hasPositiveNumber(a.pace_min_per_km))
-      .slice(0, 40)
+      .slice(0, 18)
       .map(a => {
         const speedKmh = 60 / a.pace_min_per_km;
+        const elevationPerKm = hasPositiveNumber(a.distance_km) ? (a.total_elevation_gain || 0) / a.distance_km : 0;
         return {
           id: a.id,
           name: a.name,
@@ -791,14 +792,17 @@ export default function App() {
           pace: a.pace_min_per_km,
           paceStr: formatPace(a.pace_min_per_km),
           distance: a.distance_km,
-          speedKmh
+          speedKmh,
+          isOutlier: a.pace_min_per_km < 4.2 || a.pace_min_per_km > 9.5 || elevationPerKm > 35
         };
       });
 
     if (points.length === 0) return [];
 
-    const hrs = points.map(point => point.hr);
-    const paces = points.map(point => point.pace);
+    const normalPoints = points.filter(point => !point.isOutlier);
+    const scalePoints = normalPoints.length >= 5 ? normalPoints : points;
+    const hrs = scalePoints.map(point => point.hr);
+    const paces = scalePoints.map(point => point.pace);
     const minHr = Math.min(...hrs);
     const maxHr = Math.max(...hrs);
     const minPace = Math.min(...paces);
@@ -1638,7 +1642,7 @@ async function fetchUserActivities() {
                         cx={pt.x}
                         cy={pt.y}
                         r="2.2"
-                        className="fill-orange-500 hover:fill-rose-400 transition cursor-pointer stroke-slate-900"
+                        className={`${pt.isOutlier ? 'fill-slate-500 opacity-45' : 'fill-orange-500'} hover:fill-rose-400 transition cursor-pointer stroke-slate-900`}
                         strokeWidth="1"
                         vectorEffect="non-scaling-stroke"
                       >
@@ -1648,7 +1652,7 @@ async function fetchUserActivities() {
                   </svg>
                 </div>
                 <div className="mt-2 text-center text-[11px] text-slate-400 leading-tight">
-                  점 하나는 최근 러닝 중 심박과 페이스가 있는 기록입니다. 오른쪽일수록 심박이 높고, 위쪽일수록 페이스가 빠릅니다. 같은 심박에서 더 위에 있으면 더 효율적인 기록입니다.
+                  최근 18개 러닝 기준입니다. 오른쪽일수록 심박이 높고, 위쪽일수록 페이스가 빠릅니다. 회색 점은 내리막/특이 페이스 가능성이 큰 기록이라 추세 판단에서는 약하게 봅니다.
                 </div>
                 <div className="hidden">
                   점 하나는 1회의 러닝 세션입니다. 동일 심박에서 하단(빠른 페이스)으로 점이 이동할수록 유산소 능력이 발달함을 의미합니다.
