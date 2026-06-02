@@ -2450,15 +2450,11 @@ add column if not exists monthly_goal numeric not null default 100;`}
                   </div>
                 )}
 
-                {calendarModalActivity?.raw?.map?.summary_polyline ? (
-                  <div className="h-40 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
-                    <RouteMap activity={calendarModalActivity} />
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-center text-xs text-slate-500">
-                    이 활동은 저장된 GPS 경로가 없습니다.
-                  </div>
-                )}
+                <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-xs text-slate-400">
+                  {calendarModalActivity?.raw?.map?.summary_polyline
+                    ? 'GPS 경로가 있는 활동입니다. 경로는 아래 버튼으로 경로 탭에서 확인할 수 있습니다.'
+                    : '이 활동은 저장된 GPS 경로가 없습니다.'}
+                </div>
 
                 {calendarModalActivity && (
                   <div className="flex justify-end gap-2">
