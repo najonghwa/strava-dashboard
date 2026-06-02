@@ -1546,18 +1546,18 @@ add column if not exists monthly_goal numeric not null default 100;`}
                     />
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="number"
                     min="1"
                     value={monthlyGoalDraft}
                     onChange={(e) => setMonthlyGoalDraft(e.target.value)}
-                    className="w-24 text-center bg-slate-950 border border-slate-800 text-xs rounded p-1 text-slate-300"
+                    className="h-9 w-24 rounded-xl border border-slate-800 bg-slate-950/80 px-3 text-center text-sm font-bold text-slate-100 outline-none shadow-inner shadow-black/20 focus:border-cyan-400"
                     title="월간 목표 km"
                   />
                   <button
                     onClick={handleSaveMonthlyGoal}
-                    className="rounded bg-cyan-500 px-3 py-1 text-xs font-bold text-slate-950 hover:bg-cyan-400"
+                    className="h-9 rounded-xl bg-cyan-500 px-4 text-xs font-black text-slate-950 hover:bg-cyan-400"
                   >
                     저장
                   </button>
@@ -1658,18 +1658,18 @@ add column if not exists monthly_goal numeric not null default 100;`}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="number"
                       min="1"
                       value={goalDraft}
                       onChange={(e) => setGoalDraft(e.target.value)}
-                      className="w-24 text-center bg-slate-950 border border-slate-800 text-xs rounded p-1 text-slate-300"
+                      className="h-9 w-24 rounded-xl border border-slate-800 bg-slate-950/80 px-3 text-center text-sm font-bold text-slate-100 outline-none shadow-inner shadow-black/20 focus:border-orange-400"
                       title="목표 킬로미터 조정"
                     />
                     <button
                       onClick={handleSaveYearlyGoal}
-                      className="rounded bg-orange-500 px-3 py-1 text-xs font-bold text-white hover:bg-orange-400"
+                      className="h-9 rounded-xl bg-orange-500 px-4 text-xs font-black text-white hover:bg-orange-400"
                     >
                       저장
                     </button>
@@ -2162,8 +2162,9 @@ add column if not exists monthly_goal numeric not null default 100;`}
                               title={`${day?.date.toLocaleDateString()}: ${dist > 0 ? `${dist} km 러닝` : '휴식 또는 타종목'}`}
                               onClick={() => {
                                 if (day?.runs.length) {
-                                  setRouteActivity(day.runs[0]);
-                                  setSelectedActivity(day.runs[0]);
+                                  const firstRoute = day.runs.find(activity => activity.raw?.map?.summary_polyline);
+                                  setSelectedCalendarDay({ date: day.date, activities: day.runs });
+                                  setCalendarModalActivity(firstRoute || day.runs[0]);
                                 }
                               }}
                             ></div>
@@ -2177,12 +2178,75 @@ add column if not exists monthly_goal numeric not null default 100;`}
                     <span>현재 시점</span>
                   </div>
                 </div>
+                <div className="mt-6 border-t border-slate-800 pt-5">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-md font-bold text-white mb-1">월간 운동 캘린더</h3>
+                      <p className="text-xs text-slate-400">{calendarMonthLabel} 운동 기록</p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-400 shadow-inner shadow-black/20 focus-within:border-orange-500">
+                      <span>월 선택</span>
+                      <input
+                        type="month"
+                        value={calendarMonth}
+                        onChange={(e) => setCalendarMonth(e.target.value)}
+                        className="bg-transparent text-sm font-bold text-slate-100 outline-none [color-scheme:dark]"
+                      />
+                    </label>
+                  </div>
+                  
+                  <div className="grid grid-cols-7 gap-1 text-center text-xs">
+                    {['일','월','화','수','목','금','토'].map(d => (
+                      <span key={d} className="text-slate-500 font-bold py-1">{d}</span>
+                    ))}
+                    {calendarCells.map((cell, idx) => {
+                      const hasActivities = cell.activities.length > 0;
+                      const totalDistance = cell.activities.reduce((sum, activity) => sum + activity.distance_km, 0);
+                      const mainActivity = cell.activities[0];
+
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          disabled={!cell.date}
+                          onClick={() => {
+                            if (hasActivities) {
+                              const firstRoute = cell.activities.find(activity => activity.raw?.map?.summary_polyline);
+                              setSelectedCalendarDay(cell);
+                              setCalendarModalActivity(firstRoute || cell.activities[0]);
+                            }
+                          }}
+                          className={`min-h-[70px] rounded-xl border p-2 text-left transition ${
+                            cell.date ? 'bg-slate-950/50 border-slate-800' : 'border-transparent bg-transparent text-transparent'
+                          } ${hasActivities ? 'border-orange-500/60 bg-orange-950/20 hover:bg-orange-950/40 cursor-pointer' : 'text-slate-600'}`}
+                        >
+                          {cell.date && (
+                            <>
+                              <span className={`block text-[11px] ${hasActivities ? 'font-black text-orange-300' : 'text-slate-500'}`}>
+                                {cell.date.getDate()}
+                              </span>
+                              {hasActivities && (
+                                <span className="mt-1 block space-y-0.5">
+                                  <span className="block truncate text-[10px] font-bold text-slate-200">{formatSportName(mainActivity.sport_type)}</span>
+                                  <span className="block truncate text-[10px] text-slate-400">{mainActivity.name}</span>
+                                  <span className="block text-[10px] font-semibold text-cyan-300">
+                                    {cell.activities.length}회 · {totalDistance.toFixed(1)}km
+                                  </span>
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
             </div>
 
               {/* Workout Calendar Widget */}
-              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 mb-6">
+              <div className="hidden">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="text-md font-bold text-white mb-1">트레이닝 일정 캘린더</h3>
@@ -2321,7 +2385,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
       {/* Calendar Day Detail Popup */}
       {selectedCalendarDay && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-2xl max-w-4xl w-full border border-slate-800 overflow-hidden shadow-2xl">
+          <div className="bg-slate-900 rounded-2xl max-w-2xl w-full border border-slate-800 overflow-hidden shadow-2xl">
             <div className="p-5 border-b border-slate-850 flex justify-between items-start">
               <div>
                 <h3 className="text-lg font-bold text-white">
@@ -2342,8 +2406,8 @@ add column if not exists monthly_goal numeric not null default 100;`}
               </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-5">
-              <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 gap-4 p-5">
+              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
                 {selectedCalendarDay.activities.map((activity) => (
                   <button
                     key={activity.id}
@@ -2364,7 +2428,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                 ))}
               </div>
 
-              <div className="lg:col-span-2 space-y-4">
+              <div className="space-y-4">
                 {calendarModalActivity && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
@@ -2386,9 +2450,15 @@ add column if not exists monthly_goal numeric not null default 100;`}
                   </div>
                 )}
 
-                <div className="h-72 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
-                  <RouteMap activity={calendarModalActivity} />
-                </div>
+                {calendarModalActivity?.raw?.map?.summary_polyline ? (
+                  <div className="h-40 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+                    <RouteMap activity={calendarModalActivity} />
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-center text-xs text-slate-500">
+                    이 활동은 저장된 GPS 경로가 없습니다.
+                  </div>
+                )}
 
                 {calendarModalActivity && (
                   <div className="flex justify-end gap-2">
