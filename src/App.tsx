@@ -2458,16 +2458,6 @@ add column if not exists monthly_goal numeric not null default 100;`}
 
                 {calendarModalActivity && (
                   <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => {
-                        setSelectedActivity(calendarModalActivity);
-                        setSelectedCalendarDay(null);
-                        setCalendarModalActivity(null);
-                      }}
-                      className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white"
-                    >
-                      상세 기록 보기
-                    </button>
                     {calendarModalActivity.raw?.map?.summary_polyline && (
                       <button
                         onClick={() => {
