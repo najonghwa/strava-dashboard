@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import ReactFlow, { Background, Controls, MarkerType, MiniMap } from 'reactflow';
 import L from 'leaflet';
+import 'reactflow/dist/style.css';
 import 'leaflet/dist/leaflet.css';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -275,6 +277,64 @@ const RouteMap = ({ activity }) => {
 
   return <div ref={containerRef} className="absolute inset-0 z-0" />;
 };
+
+const flowNodeStyle = {
+  background: '#0f172a',
+  border: '1px solid #334155',
+  borderRadius: 12,
+  color: '#f8fafc',
+  fontSize: 12,
+  fontWeight: 800,
+  padding: 12,
+  width: 170,
+  whiteSpace: 'pre-line',
+};
+
+const dashboardFlowNodes = [
+  { id: 'garmin', position: { x: 40, y: 70 }, data: { label: 'Garmin Watch\n운동 기록' }, style: { ...flowNodeStyle, borderColor: '#38bdf8' } },
+  { id: 'strava', position: { x: 270, y: 70 }, data: { label: 'Strava\n운동 기록 저장' }, style: { ...flowNodeStyle, borderColor: '#f97316' } },
+  { id: 'api', position: { x: 500, y: 70 }, data: { label: 'Strava API\n데이터 가져오기' }, style: { ...flowNodeStyle, borderColor: '#f97316' } },
+  { id: 'python', position: { x: 730, y: 70 }, data: { label: 'Python Script\nDB에 저장' }, style: { ...flowNodeStyle, borderColor: '#a78bfa' } },
+  { id: 'supabase', position: { x: 960, y: 70 }, data: { label: 'Supabase DB\n운동 데이터' }, style: { ...flowNodeStyle, borderColor: '#22c55e' } },
+  { id: 'canvas', position: { x: 270, y: 290 }, data: { label: 'Gemini Canvas\n초기 화면' }, style: { ...flowNodeStyle, borderColor: '#818cf8' } },
+  { id: 'webproject', position: { x: 500, y: 290 }, data: { label: 'Web Project\n대시보드 코드' }, style: { ...flowNodeStyle, borderColor: '#38bdf8' } },
+  { id: 'github', position: { x: 730, y: 290 }, data: { label: 'GitHub\n코드 저장' }, style: { ...flowNodeStyle, borderColor: '#64748b' } },
+  { id: 'vercel', position: { x: 960, y: 290 }, data: { label: 'Vercel\n인터넷 배포' }, style: { ...flowNodeStyle, borderColor: '#e2e8f0' } },
+  { id: 'dashboard', position: { x: 960, y: 500 }, data: { label: 'Dashboard\n폰/PC에서 확인' }, style: { ...flowNodeStyle, borderColor: '#f97316', background: '#1c1917' } },
+];
+
+const dashboardFlowEdges = [
+  { id: 'garmin-strava', source: 'garmin', target: 'strava', label: 'sync', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'strava-api', source: 'strava', target: 'api', label: 'request', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'api-python', source: 'api', target: 'python', label: 'data', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'python-supabase', source: 'python', target: 'supabase', label: 'save', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'canvas-webproject', source: 'canvas', target: 'webproject', label: 'code', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'webproject-github', source: 'webproject', target: 'github', label: 'push', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'github-vercel', source: 'github', target: 'vercel', label: 'deploy', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'vercel-dashboard', source: 'vercel', target: 'dashboard', label: 'web url', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'supabase-dashboard', source: 'supabase', target: 'dashboard', label: 'load data', type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } },
+];
+
+const DashboardArchitectureFlow = () => (
+  <div className="h-[560px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+    <ReactFlow
+      nodes={dashboardFlowNodes}
+      edges={dashboardFlowEdges}
+      fitView
+      fitViewOptions={{ padding: 0.18 }}
+      nodesDraggable={false}
+      nodesConnectable={false}
+      elementsSelectable={false}
+    >
+      <MiniMap
+        nodeColor={(node) => node.style?.borderColor || '#64748b'}
+        maskColor="rgba(2, 6, 23, 0.72)"
+      />
+      <Controls showInteractive={false} />
+      <Background color="#334155" gap={18} />
+    </ReactFlow>
+  </div>
+);
 
 // ==========================================
 // MOCK DATA GENERATOR (Supabase 스키마 기준)
@@ -1443,6 +1503,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                 { id: 'analysis', label: '분석', icon: '📈' },
                 { id: 'records', label: '기록', icon: '🏅' },
                 { id: 'routes', label: '경로', icon: '🗺️' },
+                { id: 'structure', label: '구조', icon: '↔' },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -2376,6 +2437,40 @@ add column if not exists monthly_goal numeric not null default 100;`}
               </div>
             </div>
               </>
+            )}
+
+            {dashboardSubTab === 'structure' && (
+              <div className="space-y-5">
+                <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-lg font-black text-white">대시보드 구조</h3>
+                      <p className="mt-1 text-xs text-slate-400">
+                        운동 기록이 Garmin에서 시작해 DB와 배포 화면까지 이어지는 흐름입니다.
+                      </p>
+                    </div>
+                    <span className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-1 text-[10px] font-bold text-slate-400">
+                      React Flow
+                    </span>
+                  </div>
+                  <DashboardArchitectureFlow />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                    <p className="text-xs font-bold text-orange-300">데이터 흐름</p>
+                    <p className="mt-2 text-sm text-slate-300">Garmin → Strava → API → Python → Supabase 순서로 운동 데이터가 저장됩니다.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                    <p className="text-xs font-bold text-cyan-300">화면 흐름</p>
+                    <p className="mt-2 text-sm text-slate-300">Gemini Canvas 초안을 웹 프로젝트로 정리해서 대시보드 화면을 만들었습니다.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                    <p className="text-xs font-bold text-emerald-300">배포 흐름</p>
+                    <p className="mt-2 text-sm text-slate-300">GitHub에 코드를 올리면 Vercel이 자동으로 새 대시보드를 배포합니다.</p>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
