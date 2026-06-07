@@ -480,105 +480,6 @@ const ActivityAreaChart = ({ title, unit, color = '#f97316', data = [], distance
   );
 };
 
-// ==========================================
-// MOCK DATA GENERATOR (Supabase 스키마 기준)
-// ==========================================
-const generateMockData = () => {
-  const sports = ['Run', 'Ride', 'Swim', 'Hike', 'AlpineSki'];
-  const data = [];
-  const today = new Date();
-
-  let idCounter = 18722577900;
-
-  // Generate around 120 activities over the past 1.5 years (spanning 2025 and 2026)
-  for (let i = 0; i < 120; i++) {
-    const date = new Date();
-    date.setDate(today.getDate() - i * 4 - Math.floor(Math.random() * 3));
-    
-    const rand = Math.random();
-    let sport = 'Run';
-    if (rand > 0.65 && rand <= 0.77) sport = 'Ride';
-    else if (rand > 0.77 && rand <= 0.87) sport = 'Swim';
-    else if (rand > 0.87 && rand <= 0.95) sport = 'Hike';
-    else if (rand > 0.95) sport = 'AlpineSki';
-
-    const start_date_local = date.toISOString().replace('T', ' ').substring(0, 19) + '+09';
-    let distance_km = 0;
-    let moving_time = 0;
-    let average_heartrate = 0;
-    let average_cadence = 0;
-    let average_watts = 0;
-    let total_elevation_gain = 0;
-
-    if (sport === 'Run') {
-      distance_km = parseFloat((3 + Math.random() * 18).toFixed(3)); // 3km ~ 21km
-      const paceSec = 270 + Math.random() * 180; 
-      moving_time = Math.round(distance_km * paceSec);
-      const baseHR = 135;
-      const speedFactor = (600 - paceSec) / 10; 
-      average_heartrate = Math.round(baseHR + speedFactor + (Math.random() * 10 - 5));
-      average_heartrate = Math.max(110, Math.min(190, average_heartrate));
-      average_cadence = parseFloat((155 + Math.random() * 30).toFixed(1));
-      average_watts = Math.round(180 + (70 - (paceSec/6)) * 4 + Math.random() * 30);
-      total_elevation_gain = Math.round(Math.random() * 150);
-    } else if (sport === 'Ride') {
-      distance_km = parseFloat((15 + Math.random() * 60).toFixed(1));
-      moving_time = Math.round(distance_km * 140); 
-      average_heartrate = Math.round(120 + Math.random() * 30);
-      average_cadence = parseFloat((75 + Math.random() * 20).toFixed(1));
-      average_watts = Math.round(120 + Math.random() * 100);
-      total_elevation_gain = Math.round(Math.random() * 500);
-    } else if (sport === 'Swim') {
-      distance_km = parseFloat((1 + Math.random() * 3).toFixed(2));
-      moving_time = Math.round(distance_km * 1200); 
-      average_heartrate = Math.round(110 + Math.random() * 25);
-    } else { 
-      distance_km = parseFloat((5 + Math.random() * 12).toFixed(1));
-      moving_time = Math.round(distance_km * 900);
-      average_heartrate = Math.round(100 + Math.random() * 40);
-      total_elevation_gain = Math.round(100 + Math.random() * 800);
-    }
-
-    const elapsed_time = Math.round(moving_time * (1 + Math.random() * 0.1));
-    const pace_min_per_km = distance_km > 0 ? (moving_time / 60) / distance_km : 0;
-    const average_speed = distance_km > 0 ? (distance_km * 1000) / moving_time : 0;
-
-    data.push({
-      id: idCounter++,
-      athlete_id: 14617204,
-      name: `${sport === 'Run' ? 'Morning Run 🏃' : sport === 'Ride' ? 'Cycle Ride 🚴' : sport === 'Swim' ? 'Pool Swim 🏊' : 'Outdoor Activity 🌲'}`,
-      sport_type: sport,
-      start_date_local,
-      distance_km,
-      moving_time,
-      elapsed_time,
-      pace_min_per_km,
-      average_speed,
-      average_heartrate,
-      max_heartrate: Math.round(average_heartrate * 1.2),
-      average_cadence,
-      average_watts,
-      total_elevation_gain,
-      device_name: 'Garmin Forerunner 955',
-      raw: {
-        route_quality: 'High',
-        temp: Math.round(5 + Math.random() * 25)
-      }
-    });
-  }
-
-  return data.sort((a, b) => new Date(b.start_date_local) - new Date(a.start_date_local));
-};
-
-const generateMapPath = (id) => {
-  const seed = id % 5;
-  if (seed === 0) return "M 10 80 Q 52.5 10, 95 80 T 180 80";
-  if (seed === 1) return "M 20 20 C 20 20, 150 10, 150 80 C 150 150, 50 130, 20 20";
-  if (seed === 2) return "M 10 80 L 50 20 L 90 80 L 130 20 L 170 80";
-  if (seed === 3) return "M 30 30 Q 150 20, 120 120 T 30 30";
-  return "M 10 50 A 40 40 0 1 0 90 50 A 40 40 0 1 0 10 50";
-};
-
 export default function App() {
   const [activities, setActivities] = useState([]);
   const [selectedSport, setSelectedSport] = useState('All');
@@ -604,14 +505,6 @@ export default function App() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
-
-  // Form states for manually adding test runs
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newRunDistance, setNewRunDistance] = useState('5.0');
-  const [newRunPace, setNewRunPace] = useState('5:30');
-  const [newRunHR, setNewRunHR] = useState('145');
-  const [newRunCadence, setNewRunCadence] = useState('172');
-  const [newRunDate, setNewRunDate] = useState(new Date().toISOString().substring(0, 10));
 
   const selectedRoutePath = useMemo(() => createRoutePath(routeActivity), [routeActivity]);
 
@@ -1346,42 +1239,6 @@ export default function App() {
       efficiencyTip: "Zone 2 회복 유산소 러닝 비율을 70% 이상 유지할 때 심폐 기초 체력이 가장 안정적으로 진화합니다."
     };
   }, [activities]);
-
-  // Handle Manual Add Activity (Simulation of Supabase Insertion)
-  const handleAddRun = (e) => {
-    e.preventDefault();
-    const dist = parseFloat(newRunDistance);
-    const parts = newRunPace.split(':');
-    const mins = parseInt(parts[0], 10);
-    const secs = parseInt(parts[1] || 0, 10);
-    const paceDecimal = mins + secs / 60;
-    const movingTime = Math.round(dist * paceDecimal * 60);
-    const hr = parseInt(newRunHR, 10);
-    const cadence = parseFloat(newRunCadence);
-
-    const newActivity = {
-      id: Date.now(),
-      athlete_id: 14617204,
-      name: "임시 러닝 테스트 (수파베이스 동기화 시뮬레이션) 👟",
-      sport_type: "Run",
-      start_date_local: `${newRunDate} 08:30:00+09`,
-      distance_km: dist,
-      moving_time: movingTime,
-      elapsed_time: Math.round(movingTime * 1.05),
-      pace_min_per_km: paceDecimal,
-      average_speed: (dist * 1000) / movingTime,
-      average_heartrate: hr,
-      max_heartrate: Math.round(hr * 1.25),
-      average_cadence: cadence,
-      average_watts: Math.round(230 + (180 - cadence) * 3),
-      total_elevation_gain: Math.round(Math.random() * 45),
-      device_name: "Garmin Forerunner 955",
-      raw: { route_quality: 'Premium Verified' }
-    };
-
-    setActivities([newActivity, ...activities]);
-    setShowAddModal(false);
-  };
 
   const handleConnectSupabase = () => {
     if (!supabaseUrl || !supabaseKey) {
@@ -2160,7 +2017,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <div className="hidden">
                   <div className="flex justify-between items-start">
                     <div>
@@ -2220,6 +2077,69 @@ add column if not exists monthly_goal numeric not null default 100;`}
                     <div>
                       <div className="flex justify-between text-[11px] text-slate-400"><span>Hard</span><span>{subscriptionStyleInsights.paceZoneHard}%</span></div>
                       <div className="h-2 bg-slate-800 rounded overflow-hidden"><div className="h-full bg-rose-500" style={{ width: `${subscriptionStyleInsights.paceZoneHard}%` }} /></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:col-span-2 gap-4">
+                  <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs text-slate-400 font-semibold">페이스 발전 흐름</p>
+                      <span className="text-[10px] text-slate-500">최근 20회</span>
+                    </div>
+                    <div className="relative h-40 w-full rounded-lg border border-slate-800 bg-slate-950/70 pl-10 pr-3 pt-3 pb-7">
+                      <div className="absolute left-2 top-2 text-[9px] font-mono text-slate-500">{paceChartLabels.fast}</div>
+                      <div className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-slate-600">{paceChartLabels.mid}</div>
+                      <div className="absolute left-2 bottom-7 text-[9px] font-mono text-slate-500">{paceChartLabels.slow}</div>
+                      <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                        {[15, 50, 85].map((y) => (
+                          <line key={`mini-pace-y-${y}`} x1="0" y1={y} x2="100" y2={y} stroke="#1e293b" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+                        ))}
+                        {[5, 50, 95].map((x) => (
+                          <line key={`mini-pace-x-${x}`} x1={x} y1="0" x2={x} y2="100" stroke="#0f172a" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+                        ))}
+                        {pacePointsString && (
+                          <polyline fill="none" stroke="#f97316" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" points={pacePointsString} />
+                        )}
+                        {paceChartPoints.map((h, idx) => (
+                          <circle key={idx} cx={h.x} cy={h.y} r="2.1" className="fill-orange-500 hover:fill-amber-300 transition cursor-pointer stroke-slate-900" strokeWidth="1.2" vectorEffect="non-scaling-stroke">
+                            <title>{`${h.date} | ${h.paceStr}/km`}</title>
+                          </circle>
+                        ))}
+                      </svg>
+                      <div className="absolute bottom-1 left-10 right-3 flex justify-between text-[9px] text-slate-500">
+                        <span>이전</span>
+                        <span>최근</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs text-slate-400 font-semibold">심박수 vs 페이스</p>
+                      <span className="text-[10px] text-slate-500">최근 러닝</span>
+                    </div>
+                    <div className="relative h-40 w-full rounded-lg border border-slate-800 bg-slate-950/70 pl-10 pr-3 pt-3 pb-7">
+                      <div className="absolute left-2 top-2 text-[9px] font-mono text-slate-500">{hrPaceLabels.fast}</div>
+                      <div className="absolute left-2 bottom-7 text-[9px] font-mono text-slate-500">{hrPaceLabels.slow}</div>
+                      <div className="absolute bottom-1 left-10 right-3 flex justify-between text-[9px] font-mono text-slate-500">
+                        <span>{hrPaceLabels.lowHr} bpm</span>
+                        <span>{hrPaceLabels.highHr} bpm</span>
+                      </div>
+                      <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                        {[15, 50, 85].map((y) => (
+                          <line key={`mini-hrp-y-${y}`} x1="0" y1={y} x2="100" y2={y} stroke="#1e293b" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+                        ))}
+                        {[10, 50, 90].map((x) => (
+                          <line key={`mini-hrp-x-${x}`} x1={x} y1="0" x2={x} y2="100" stroke="#0f172a" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+                        ))}
+                        <line x1="10" y1="85" x2="90" y2="15" stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
+                        {hrVsPacePoints.map((pt, idx) => (
+                          <circle key={idx} cx={pt.x} cy={pt.y} r="2.2" className={`${pt.isOutlier ? 'fill-slate-500 opacity-45' : 'fill-orange-500'} hover:fill-rose-400 transition cursor-pointer stroke-slate-900`} strokeWidth="1" vectorEffect="non-scaling-stroke">
+                            <title>{`${pt.date} | ${pt.paceStr}/km | ${pt.hr} bpm`}</title>
+                          </circle>
+                        ))}
+                      </svg>
                     </div>
                   </div>
                 </div>
@@ -2305,7 +2225,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
               </div>
 
               {/* 4. Pace Trend graph with dynamic slope */}
-              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
+              <div className="hidden">
                 <div className="flex justify-between items-center mb-1">
                   <h3 className="text-md font-bold text-white">페이스 발전 흐름 (최근 20회)</h3>
                   <span className="text-[10px] text-green-400 font-mono">낮을수록 빠름 ↘</span>
@@ -2380,7 +2300,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
               </div>
 
               {/* 5. Heart Rate vs Pace Scatter Plot */}
-              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
+              <div className="hidden">
                 <div className="flex justify-between items-center mb-1">
                   <h3 className="text-md font-bold text-white">심박수 vs 페이스 분포도</h3>
                   <span className="text-[10px] text-cyan-400">최근 러닝</span>
@@ -3237,99 +3157,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
         </div>
       )}
 
-      {/* Manual Insert Mockup Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleAddRun} className="bg-slate-900 rounded-2xl max-w-md w-full border border-slate-800 overflow-hidden shadow-2xl">
-            <div className="p-5 border-b border-slate-850 flex justify-between items-center">
-              <h3 className="text-md font-bold text-white">동기화 테스트용 러닝 추가</h3>
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">러닝 거리 (km)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={newRunDistance}
-                  onChange={(e) => setNewRunDistance(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-sm rounded-lg p-2 text-slate-100"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1">페이스 (분:초)</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="5:30"
-                    value={newRunPace}
-                    onChange={(e) => setNewRunPace(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-sm rounded-lg p-2 text-slate-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1">평균 심박수 (bpm)</label>
-                  <input
-                    type="number"
-                    required
-                    value={newRunHR}
-                    onChange={(e) => setNewRunHR(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-sm rounded-lg p-2 text-slate-100"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1">케이던스 (spm)</label>
-                  <input
-                    type="number"
-                    value={newRunCadence}
-                    onChange={(e) => setNewRunCadence(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-sm rounded-lg p-2 text-slate-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1">운동 일자</label>
-                  <input
-                    type="date"
-                    required
-                    value={newRunDate}
-                    onChange={(e) => setNewRunDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-sm rounded-lg p-2 text-slate-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5 bg-slate-950 border-t border-slate-850 flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold transition"
-              >
-                취소
-              </button>
-              <button
-                type="submit"
-                className="bg-orange-500 hover:bg-orange-400 text-white px-4 py-2 rounded-lg text-xs font-bold transition"
-              >
-                훈련 기록 추가
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950 py-8 mt-12 text-center text-xs text-slate-600">
