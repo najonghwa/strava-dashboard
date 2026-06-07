@@ -2091,7 +2091,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                       <div className="absolute left-2 top-2 text-[9px] font-mono text-slate-500">{paceChartLabels.fast}</div>
                       <div className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] font-mono text-slate-600">{paceChartLabels.mid}</div>
                       <div className="absolute left-2 bottom-7 text-[9px] font-mono text-slate-500">{paceChartLabels.slow}</div>
-                      <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                      <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
                         {[15, 50, 85].map((y) => (
                           <line key={`mini-pace-y-${y}`} x1="0" y1={y} x2="100" y2={y} stroke="#1e293b" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
                         ))}
@@ -2099,10 +2099,10 @@ add column if not exists monthly_goal numeric not null default 100;`}
                           <line key={`mini-pace-x-${x}`} x1={x} y1="0" x2={x} y2="100" stroke="#0f172a" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
                         ))}
                         {pacePointsString && (
-                          <polyline fill="none" stroke="#f97316" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" points={pacePointsString} />
+                          <polyline fill="none" stroke="#f97316" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" points={pacePointsString} />
                         )}
                         {paceChartPoints.map((h, idx) => (
-                          <circle key={idx} cx={h.x} cy={h.y} r="2.1" className="fill-orange-500 hover:fill-amber-300 transition cursor-pointer stroke-slate-900" strokeWidth="1.2" vectorEffect="non-scaling-stroke">
+                          <circle key={idx} cx={h.x} cy={h.y} r="1.6" className="fill-orange-500 hover:fill-amber-300 transition cursor-pointer stroke-slate-900" strokeWidth="0.9" vectorEffect="non-scaling-stroke">
                             <title>{`${h.date} | ${h.paceStr}/km`}</title>
                           </circle>
                         ))}
@@ -2126,7 +2126,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                         <span>{hrPaceLabels.lowHr} bpm</span>
                         <span>{hrPaceLabels.highHr} bpm</span>
                       </div>
-                      <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                      <svg className="absolute left-10 right-3 top-3 bottom-7 h-[calc(100%-2.5rem)] w-[calc(100%-3.25rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
                         {[15, 50, 85].map((y) => (
                           <line key={`mini-hrp-y-${y}`} x1="0" y1={y} x2="100" y2={y} stroke="#1e293b" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
                         ))}
@@ -2135,7 +2135,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                         ))}
                         <line x1="10" y1="85" x2="90" y2="15" stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
                         {hrVsPacePoints.map((pt, idx) => (
-                          <circle key={idx} cx={pt.x} cy={pt.y} r="2.2" className={`${pt.isOutlier ? 'fill-slate-500 opacity-45' : 'fill-orange-500'} hover:fill-rose-400 transition cursor-pointer stroke-slate-900`} strokeWidth="1" vectorEffect="non-scaling-stroke">
+                          <circle key={idx} cx={pt.x} cy={pt.y} r="1.7" className={`${pt.isOutlier ? 'fill-slate-500 opacity-45' : 'fill-orange-500'} hover:fill-rose-400 transition cursor-pointer stroke-slate-900`} strokeWidth="0.8" vectorEffect="non-scaling-stroke">
                             <title>{`${pt.date} | ${pt.paceStr}/km | ${pt.hr} bpm`}</title>
                           </circle>
                         ))}
@@ -2192,10 +2192,10 @@ add column if not exists monthly_goal numeric not null default 100;`}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
               
               {/* 3. Sport Type Distribution (Donut style) */}
-              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
+              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 lg:col-span-3">
                 <h3 className="text-md font-bold text-white mb-1">운동 종류 비율</h3>
                 <p className="text-xs text-slate-400 mb-4">멀티스포츠 훈련 편중도 점검</p>
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-3">
                   {sportRatio.map((item, index) => {
                     const total = sportRatio.reduce((sum, i) => sum + i.value, 0);
                     const percentage = Math.round((item.value / total) * 100);
