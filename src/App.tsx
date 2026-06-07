@@ -57,7 +57,10 @@ const normalizeSupabaseActivity = (row) => {
     max_heartrate: toNumber(row.max_heartrate),
     average_cadence: toNumber(row.average_cadence),
     average_watts: toNumber(row.average_watts),
+    max_watts: toNumber(row.max_watts),
     total_elevation_gain: toNumber(row.total_elevation_gain),
+    elev_high: toNumber(row.elev_high),
+    elev_low: toNumber(row.elev_low),
     device_name: row.device_name || 'Unknown device',
     raw,
   };
@@ -119,6 +122,90 @@ const formatSportName = (sport) => {
 };
 
 const hasPositiveNumber = (value) => Number.isFinite(value) && value > 0;
+
+const formatPaceValue = (paceDecimal) => {
+  if (!paceDecimal || isNaN(paceDecimal)) return '0:00';
+  const totalSeconds = Math.round(paceDecimal * 60);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+};
+
+const formatDurationValue = (sec) => {
+  const total = Math.max(0, Math.round(sec || 0));
+  const hrs = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hrs > 0) return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+};
+
+const getNested = (obj, path) => {
+  return path.split('.').reduce((acc, key) => acc?.[key], obj);
+};
+
+const getStreamValues = (activity, keys) => {
+  const raw = activity?.raw || {};
+  for (const key of keys) {
+    const value = getNested(raw, key);
+    if (Array.isArray(value)) return value.map(Number).filter(Number.isFinite);
+    if (Array.isArray(value?.data)) return value.data.map(Number).filter(Number.isFinite);
+  }
+  return [];
+};
+
+const getDistanceStreamKm = (activity, fallbackLength = 0) => {
+  const distances = getStreamValues(activity, ['streams.distance', 'distance', 'raw.streams.distance']);
+  if (distances.length > 0) {
+    return distances.map((distance) => distance / 1000);
+  }
+
+  const totalDistance = activity?.distance_km || 0;
+  if (!fallbackLength || !totalDistance) return [];
+  return Array(fallbackLength).fill(0).map((_, index) => {
+    return (totalDistance * index) / Math.max(fallbackLength - 1, 1);
+  });
+};
+
+const getActivitySplits = (activity) => {
+  const raw = activity?.raw || {};
+  const splits = raw.splits_metric || raw.splits_standard || raw.laps || [];
+  if (!Array.isArray(splits)) return [];
+
+  return splits
+    .map((split, index) => {
+      const distanceKm = toNumber(split.distance) / 1000 || toNumber(split.distance_km) || (index + 1);
+      const movingTime = toNumber(split.moving_time, toNumber(split.elapsed_time));
+      const pace = distanceKm > 0 && movingTime > 0 ? movingTime / 60 / distanceKm : 0;
+      return {
+        label: distanceKm >= 0.95 && distanceKm <= 1.05 ? `${index + 1}` : distanceKm.toFixed(1),
+        distanceKm,
+        pace,
+        paceText: pace ? `${formatPaceValue(pace)}` : '-',
+        elevation: Math.round(toNumber(split.elevation_difference, toNumber(split.total_elevation_gain))),
+        hr: Math.round(toNumber(split.average_heartrate)),
+      };
+    })
+    .filter((split) => split.distanceKm > 0)
+    .slice(0, 12);
+};
+
+const getBestEfforts = (activity) => {
+  const efforts = activity?.raw?.best_efforts;
+  if (!Array.isArray(efforts)) return [];
+
+  return efforts.slice(0, 5).map((effort) => {
+    const distanceKm = toNumber(effort.distance) / 1000;
+    const movingTime = toNumber(effort.moving_time, toNumber(effort.elapsed_time));
+    const pace = distanceKm > 0 && movingTime > 0 ? movingTime / 60 / distanceKm : 0;
+
+    return {
+      name: effort.name || (distanceKm >= 1 ? `${distanceKm.toFixed(1)} km` : `${Math.round(distanceKm * 1000)} m`),
+      time: formatDurationValue(movingTime),
+      pace: pace ? `${formatPaceValue(pace)} /km` : '-',
+    };
+  });
+};
 
 const calculateRelativeEffort = (activity) => {
   if (!hasPositiveNumber(activity.moving_time)) return 0;
@@ -335,6 +422,63 @@ const DashboardArchitectureFlow = () => (
     </ReactFlow>
   </div>
 );
+
+const ActivityAreaChart = ({ title, unit, color = '#f97316', data = [], distance = [], averageLabel, emptyText }) => {
+  const cleanData = data.map(Number).filter(Number.isFinite);
+  if (cleanData.length < 2) {
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h4 className="text-sm font-black text-white">{title}</h4>
+          <span className="text-[10px] font-bold text-slate-500">{unit}</span>
+        </div>
+        <div className="flex h-36 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/60 text-xs text-slate-500">
+          {emptyText || '상세 스트림 데이터가 없습니다.'}
+        </div>
+      </div>
+    );
+  }
+
+  const width = 360;
+  const height = 150;
+  const padding = 18;
+  const min = Math.min(...cleanData);
+  const max = Math.max(...cleanData);
+  const range = Math.max(max - min, 1);
+  const points = cleanData.map((value, index) => {
+    const x = padding + (index / Math.max(cleanData.length - 1, 1)) * (width - padding * 2);
+    const y = height - padding - ((value - min) / range) * (height - padding * 2);
+    return { x, y, value };
+  });
+  const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${height - padding} L ${points[0].x.toFixed(1)} ${height - padding} Z`;
+  const avg = cleanData.reduce((sum, value) => sum + value, 0) / cleanData.length;
+  const avgY = height - padding - ((avg - min) / range) * (height - padding * 2);
+  const maxDistance = distance.length ? Math.max(...distance) : 0;
+
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="text-sm font-black text-white">{title}</h4>
+        <span className="text-[10px] font-bold text-slate-500">{averageLabel || `${Math.round(avg)} ${unit}`}</span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-44 w-full overflow-visible">
+        {[0, 1, 2].map((tick) => {
+          const y = padding + tick * ((height - padding * 2) / 2);
+          return <line key={tick} x1={padding} x2={width - padding} y1={y} y2={y} stroke="#334155" strokeWidth="1" opacity="0.65" />;
+        })}
+        <path d={areaPath} fill={color} opacity="0.55" />
+        <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" />
+        <line x1={padding} x2={width - padding} y1={avgY} y2={avgY} stroke="#e2e8f0" strokeWidth="1.5" strokeDasharray="6 6" opacity="0.9" />
+        <text x={padding} y={padding - 4} fill="#94a3b8" fontSize="10">{Math.round(max)} {unit}</text>
+        <text x={padding} y={height - 4} fill="#94a3b8" fontSize="10">{Math.round(min)} {unit}</text>
+        <text x={width - padding} y={height - 4} fill="#94a3b8" fontSize="10" textAnchor="end">
+          {maxDistance ? `${maxDistance.toFixed(1)} km` : 'distance'}
+        </text>
+      </svg>
+    </div>
+  );
+};
 
 // ==========================================
 // MOCK DATA GENERATOR (Supabase 스키마 기준)
@@ -643,6 +787,17 @@ export default function App() {
         matchedRouteLatest: 'N/A',
         matchedRouteBest: 'N/A',
         matchedRouteDelta: 0,
+        matchedRouteRows: [],
+        intelligenceText: '운동 기록이 쌓이면 최근 흐름을 분석해 보여줍니다.',
+        prediction1k: 'N/A',
+        prediction5k: 'N/A',
+        prediction10k: 'N/A',
+        predictionHalf: 'N/A',
+        workoutFocus: 'Steady',
+        workoutTitle: '기록 수집 중',
+        workoutDuration: '40분',
+        workoutDifficulty: 'Easy',
+        workoutGuide: '최근 기록이 더 쌓이면 추천 운동을 계산합니다.',
         powerCoverage: 0,
         avgPower: 0,
         terrainAdjustedPace: '0:00',
@@ -712,14 +867,16 @@ export default function App() {
       ? Math.round(powerActivities.reduce((sum, a) => sum + a.average_watts, 0) / powerActivities.length)
       : 0;
 
-    const routeGroups = {};
+    const routeGroups = new Map();
     runActivities.forEach((activity) => {
       const distanceBucket = Math.round(activity.distance_km * 2) / 2;
       const key = `${activity.name || 'Run'}-${distanceBucket}`;
-      routeGroups[key] = routeGroups[key] || [];
-      routeGroups[key].push(activity);
+      const group = routeGroups.get(key) || [];
+      group.push(activity);
+      routeGroups.set(key, group);
     });
-    const matchedGroup = Object.values(routeGroups)
+    const matchedGroups = Array.from(routeGroups.values());
+    const matchedGroup = matchedGroups
       .filter(group => group.length >= 3)
       .sort((a, b) => b[0].date - a[0].date)[0] || [];
     const matchedLatest = matchedGroup.length
@@ -731,6 +888,77 @@ export default function App() {
     const matchedRouteDelta = matchedLatest && matchedBest
       ? Math.round((matchedLatest.pace_min_per_km - matchedBest.pace_min_per_km) * 60)
       : 0;
+    const matchedRouteRows = matchedGroup.length
+      ? [...matchedGroup]
+        .sort((a, b) => b.date - a.date)
+        .slice(0, 5)
+        .map((activity) => ({
+          id: activity.id,
+          date: activity.date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }),
+          speed: hasPositiveNumber(activity.average_speed)
+            ? `${(activity.average_speed * 3.6).toFixed(1)} km/h`
+            : `${formatPace(activity.pace_min_per_km)} /km`,
+          time: formatDurationValue(activity.moving_time),
+          effort: activity.relativeEffort,
+        }))
+      : [];
+    const recentRuns = runActivities
+      .filter((activity) => activity.pace_min_per_km >= 3 && activity.pace_min_per_km <= 12)
+      .slice(-20);
+    const bestPace = runActivities.length
+      ? Math.min(...runActivities.map((activity) => activity.pace_min_per_km))
+      : 0;
+    const recentBestPace = recentRuns.length
+      ? Math.min(...recentRuns.map((activity) => activity.pace_min_per_km))
+      : 0;
+    const intelligenceText = recentBestPace && bestPace && recentBestPace <= bestPace * 1.03
+      ? `최근 ${recentRuns.length}개 러닝 중 가장 빠른 구간에 가깝습니다. 강도는 유지하되 회복일을 같이 배치하는 편이 좋습니다.`
+      : rampRate > 15
+        ? `최근 훈련 부하가 빠르게 늘었습니다. 이번 주는 쉬운 운동 비율을 높이면 안정적으로 이어갈 수 있습니다.`
+        : `최근 흐름은 안정적입니다. 같은 강도의 운동을 꾸준히 반복하면 기본 체력을 쌓기 좋습니다.`;
+    const predictionBase = recentRuns.length
+      ? recentRuns.reduce((sum, activity) => sum + activity.pace_min_per_km, 0) / recentRuns.length
+      : 0;
+    const predictionFactor = form > 5 ? 0.97 : form < -10 ? 1.04 : 1;
+    const predictedPace = predictionBase * predictionFactor;
+    const prediction1k = predictedPace ? formatDurationValue(predictedPace * 60 * 0.92) : 'N/A';
+    const prediction5k = predictedPace ? formatDurationValue(predictedPace * 5 * 60) : 'N/A';
+    const prediction10k = predictedPace ? formatDurationValue(predictedPace * 10 * 60 * 1.06) : 'N/A';
+    const predictionHalf = predictedPace ? formatDurationValue(predictedPace * 21.0975 * 60 * 1.14) : 'N/A';
+    const workoutFocus = rampRate > 25 ? 'Easier' : paceZoneHard > 35 ? 'Steady' : paceZoneEasy > 65 ? 'Harder' : 'Steady';
+    const workoutTitle = workoutFocus === 'Easier'
+      ? '회복 조깅'
+      : workoutFocus === 'Harder'
+        ? '짧은 템포런'
+        : '스테디 유산소';
+    const workoutGuide = workoutFocus === 'Easier'
+      ? '30-40분 정도 편한 강도로 뛰면서 피로를 낮추는 날로 잡아보세요.'
+      : workoutFocus === 'Harder'
+        ? '워밍업 후 5분 빠르게, 3분 천천히를 3-4회 반복해보세요.'
+        : '40-60분 동안 대화 가능한 강도로 일정하게 움직이는 운동을 추천합니다.';
+
+    const readableIntelligenceText = recentBestPace && bestPace && recentBestPace <= bestPace * 1.03
+      ? `최근 ${recentRuns.length}개 러닝 중 좋은 페이스가 나왔습니다. 강도는 유지하되 회복일을 같이 배치하면 흐름을 이어가기 좋습니다.`
+      : rampRate > 15
+        ? '최근 운동 부하가 빠르게 늘었습니다. 이번 주는 가벼운 운동 비율을 높이면 더 안정적으로 이어갈 수 있습니다.'
+        : '최근 흐름은 안정적입니다. 비슷한 강도의 운동을 꾸준히 반복하면 기본 체력을 쌓기 좋습니다.';
+    const readableWorkoutFocus = rampRate > 25 || form < -10
+      ? 'Easier'
+      : paceZoneEasy > 65
+        ? 'Harder'
+        : 'Steady';
+    const readableWorkoutTitle = readableWorkoutFocus === 'Easier'
+      ? '회복 조깅'
+      : readableWorkoutFocus === 'Harder'
+        ? '템포 러닝'
+        : '꾸준한 유산소 러닝';
+    const readableWorkoutDuration = readableWorkoutFocus === 'Harder' ? '35분' : readableWorkoutFocus === 'Easier' ? '30분' : '45분';
+    const readableWorkoutDifficulty = readableWorkoutFocus === 'Harder' ? 'Medium' : 'Easy';
+    const readableWorkoutGuide = readableWorkoutFocus === 'Easier'
+      ? '최근 부하가 높거나 피로가 쌓인 흐름입니다. 편한 강도로 몸을 풀어주는 운동이 어울립니다.'
+      : readableWorkoutFocus === 'Harder'
+        ? '쉬운 러닝 비중이 충분합니다. 짧은 템포 구간을 넣어 페이스 감각을 올려볼 만합니다.'
+        : '현재 흐름은 안정적입니다. 무리하지 않는 강도로 시간을 채우는 운동이 잘 맞습니다.';
 
     return {
       currentWeekEffort,
@@ -754,6 +982,17 @@ export default function App() {
       matchedRouteLatest: matchedLatest ? formatPace(matchedLatest.pace_min_per_km) : 'N/A',
       matchedRouteBest: matchedBest ? formatPace(matchedBest.pace_min_per_km) : 'N/A',
       matchedRouteDelta,
+      matchedRouteRows,
+      intelligenceText: readableIntelligenceText,
+      prediction1k,
+      prediction5k,
+      prediction10k,
+      predictionHalf,
+      workoutFocus: readableWorkoutFocus,
+      workoutTitle: readableWorkoutTitle,
+      workoutDuration: readableWorkoutDuration,
+      workoutDifficulty: readableWorkoutDifficulty,
+      workoutGuide: readableWorkoutGuide,
       powerCoverage,
       avgPower,
       terrainAdjustedPace,
@@ -1221,6 +1460,63 @@ export default function App() {
       setGoalSaveStatus('저장 실패: dashboard_settings 테이블과 권한을 확인해주세요.');
     }
   };
+
+  const selectedActivityDetails = useMemo(() => {
+    if (!selectedActivity) {
+      return {
+        distanceKm: [],
+        heartRate: [],
+        power: [],
+        pace: [],
+        elevation: [],
+        cadence: [],
+        splits: [],
+        bestEfforts: [],
+        maxPower: 0,
+        totalWork: 0,
+        avgElapsedPace: 0,
+        fastestSplit: 0,
+      };
+    }
+
+    const heartRate = getStreamValues(selectedActivity, ['streams.heartrate', 'heartrate']);
+    const power = getStreamValues(selectedActivity, ['streams.watts', 'watts']);
+    const altitude = getStreamValues(selectedActivity, ['streams.altitude', 'altitude']);
+    const cadence = getStreamValues(selectedActivity, ['streams.cadence', 'cadence']);
+    const speed = getStreamValues(selectedActivity, ['streams.velocity_smooth', 'velocity_smooth']);
+    const pace = speed
+      .map((metersPerSecond) => metersPerSecond > 0 ? 1000 / metersPerSecond / 60 : 0)
+      .filter((value) => Number.isFinite(value) && value > 0 && value < 60);
+    const fallbackLength = Math.max(heartRate.length, power.length, altitude.length, cadence.length, pace.length);
+    const distanceKm = getDistanceStreamKm(selectedActivity, fallbackLength);
+    const splits = getActivitySplits(selectedActivity);
+    const bestEfforts = getBestEfforts(selectedActivity);
+    const maxPower = power.length ? Math.round(Math.max(...power)) : Math.round(toNumber(selectedActivity.raw?.max_watts, toNumber(selectedActivity.average_watts)));
+    const totalWork = hasPositiveNumber(selectedActivity.average_watts) && hasPositiveNumber(selectedActivity.moving_time)
+      ? Math.round((selectedActivity.average_watts * selectedActivity.moving_time) / 1000)
+      : Math.round(toNumber(selectedActivity.raw?.kilojoules));
+    const avgElapsedPace = hasPositiveNumber(selectedActivity.elapsed_time) && hasPositiveNumber(selectedActivity.distance_km)
+      ? selectedActivity.elapsed_time / 60 / selectedActivity.distance_km
+      : 0;
+    const fastestSplit = splits.length
+      ? Math.min(...splits.map((split) => split.pace).filter((value) => value > 0))
+      : 0;
+
+    return {
+      distanceKm,
+      heartRate,
+      power,
+      pace,
+      elevation: altitude,
+      cadence,
+      splits,
+      bestEfforts,
+      maxPower,
+      totalWork,
+      avgElapsedPace,
+      fastestSplit,
+    };
+  }, [selectedActivity]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
@@ -1756,6 +2052,84 @@ add column if not exists monthly_goal numeric not null default 100;`}
                 </div>
                 <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-2 py-1">개인 기록 기준 요약</span>
               </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-4">
+                <div className="xl:col-span-2 bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold mb-2">개인 인사이트</p>
+                  <p className="text-sm leading-6 text-slate-100">{subscriptionStyleInsights.intelligenceText}</p>
+                  <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-lg bg-slate-900 p-2">
+                      <p className="text-lg font-black text-cyan-400">{subscriptionStyleInsights.fitness}</p>
+                      <p className="text-[10px] text-slate-500">체력</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-900 p-2">
+                      <p className="text-lg font-black text-rose-400">{subscriptionStyleInsights.fatigue}</p>
+                      <p className="text-[10px] text-slate-500">피로</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-900 p-2">
+                      <p className="text-lg font-black text-emerald-400">{subscriptionStyleInsights.form}</p>
+                      <p className="text-[10px] text-slate-500">컨디션</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold mb-2">예상 기록</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ['1K', subscriptionStyleInsights.prediction1k],
+                      ['5K', subscriptionStyleInsights.prediction5k],
+                      ['10K', subscriptionStyleInsights.prediction10k],
+                      ['Half', subscriptionStyleInsights.predictionHalf],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg bg-slate-900 p-2">
+                        <p className="text-[10px] font-bold text-slate-500">{label}</p>
+                        <p className="text-sm font-black text-white">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[10px] text-slate-500">최근 정상 범위 러닝 페이스 기준 추정값</p>
+                </div>
+
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                  <p className="text-xs text-slate-400 font-semibold mb-2">추천 운동</p>
+                  <div className="mb-3 flex gap-1 text-[10px] font-bold">
+                    {['Easier', 'Steady', 'Harder'].map((focus) => (
+                      <span
+                        key={focus}
+                        className={`rounded-full px-2 py-1 ${subscriptionStyleInsights.workoutFocus === focus ? 'bg-orange-500 text-white' : 'bg-slate-900 text-slate-500'}`}
+                      >
+                        {focus}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-lg font-black text-white">{subscriptionStyleInsights.workoutTitle}</p>
+                  <p className="text-xs text-orange-300 mt-1">{subscriptionStyleInsights.workoutDuration} · {subscriptionStyleInsights.workoutDifficulty}</p>
+                  <p className="mt-2 text-[11px] leading-5 text-slate-400">{subscriptionStyleInsights.workoutGuide}</p>
+                </div>
+              </div>
+
+              {subscriptionStyleInsights.matchedRouteRows.length > 0 && (
+                <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs text-slate-400 font-semibold">반복 활동 비교</p>
+                      <p className="mt-1 text-sm font-bold text-white">{subscriptionStyleInsights.matchedRouteName}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-500">이름과 거리 기준</span>
+                  </div>
+                  <div className="space-y-2">
+                    {subscriptionStyleInsights.matchedRouteRows.map((row) => (
+                      <div key={row.id} className="grid grid-cols-4 gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs">
+                        <span className="font-bold text-slate-200">{row.date}</span>
+                        <span className="text-orange-300">{row.speed}</span>
+                        <span className="text-slate-300">{row.time}</span>
+                        <span className="text-right text-slate-500">{row.effort} RE</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div className="hidden">
@@ -2577,7 +2951,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
       {/* Selected Workout Detail Panel Popups */}
       {selectedActivity && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-2xl max-w-lg w-full border border-slate-800 overflow-hidden shadow-2xl">
+          <div className="bg-slate-900 rounded-2xl max-w-5xl w-full max-h-[92vh] border border-slate-800 overflow-hidden shadow-2xl">
             <div className="p-5 border-b border-slate-850 flex justify-between items-start">
               <div>
                 <span className="text-xs bg-orange-500/10 text-orange-400 font-bold px-2 py-0.5 rounded uppercase">
@@ -2594,7 +2968,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-sm text-slate-300">
+            <div className="p-5 space-y-5 text-sm text-slate-300 overflow-y-auto max-h-[78vh]">
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-950 p-3 rounded-lg border border-slate-850">
                   <span className="text-xs text-slate-500 font-medium">훈련 거리</span>
@@ -2632,6 +3006,138 @@ add column if not exists monthly_goal numeric not null default 100;`}
                 <div className="bg-slate-950 p-2 rounded">
                   <span className="text-slate-500 block">평균 파워</span>
                   <span className="font-bold text-white text-sm">{selectedActivity.average_watts || '-'} W</span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h4 className="text-sm font-black text-white">스플릿</h4>
+                  <span className="text-[10px] font-bold text-slate-500">km별 기록</span>
+                </div>
+                {selectedActivityDetails.splits.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[48px_64px_1fr_52px_52px] gap-2 border-b border-slate-800 pb-2 text-[10px] font-bold text-slate-500">
+                      <span>Km</span>
+                      <span>Pace</span>
+                      <span></span>
+                      <span className="text-right">Elev</span>
+                      <span className="text-right">HR</span>
+                    </div>
+                    {selectedActivityDetails.splits.map((split, index) => {
+                      const paces = selectedActivityDetails.splits.map((item) => item.pace).filter((value) => value > 0);
+                      const fastest = Math.min(...paces);
+                      const slowest = Math.max(...paces);
+                      const width = split.pace > 0
+                        ? 30 + ((slowest - split.pace) / Math.max(slowest - fastest, 0.1)) * 70
+                        : 12;
+                      return (
+                        <div key={`${split.label}-${index}`} className="grid grid-cols-[48px_64px_1fr_52px_52px] items-center gap-2 text-xs">
+                          <span className="font-bold text-slate-300">{split.label}</span>
+                          <span className="font-mono text-slate-100">{split.paceText}</span>
+                          <div className="h-5 rounded bg-slate-900">
+                            <div className="h-5 rounded bg-blue-500" style={{ width: `${Math.max(8, width)}%` }} />
+                          </div>
+                          <span className="text-right text-slate-400">{split.elevation || '-'}</span>
+                          <span className="text-right text-slate-400">{split.hr || '-'}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 text-center text-xs text-slate-500">
+                    이 활동에는 km별 스플릿 데이터가 저장되어 있지 않습니다.
+                  </div>
+                )}
+              </div>
+
+              {selectedActivityDetails.bestEfforts.length > 0 && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="text-sm font-black text-white">기록 결과</h4>
+                    <span className="text-[10px] font-bold text-slate-500">Best Efforts</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {selectedActivityDetails.bestEfforts.map((effort, index) => (
+                      <div key={`${effort.name}-${index}`} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+                        <p className="text-xs font-bold text-slate-400">{effort.name}</p>
+                        <p className="mt-1 text-lg font-black text-white">{effort.time}</p>
+                        <p className="text-xs font-bold text-orange-300">{effort.pace}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <ActivityAreaChart
+                  title="페이스"
+                  unit="/km"
+                  color="#60a5fa"
+                  data={selectedActivityDetails.pace}
+                  distance={selectedActivityDetails.distanceKm}
+                  averageLabel={`${formatPace(selectedActivity.pace_min_per_km)} /km`}
+                  emptyText="상세 페이스 스트림 데이터가 없습니다."
+                />
+                <ActivityAreaChart
+                  title="심박수"
+                  unit="bpm"
+                  color="#f87171"
+                  data={selectedActivityDetails.heartRate}
+                  distance={selectedActivityDetails.distanceKm}
+                  averageLabel={`${Math.round(selectedActivity.average_heartrate || 0)} bpm`}
+                  emptyText="상세 심박 스트림 데이터가 없습니다."
+                />
+                <ActivityAreaChart
+                  title="파워"
+                  unit="W"
+                  color="#c084fc"
+                  data={selectedActivityDetails.power}
+                  distance={selectedActivityDetails.distanceKm}
+                  averageLabel={`${Math.round(selectedActivity.average_watts || 0)} W`}
+                  emptyText="상세 파워 스트림 데이터가 없습니다."
+                />
+                <ActivityAreaChart
+                  title="고도"
+                  unit="m"
+                  color="#94a3b8"
+                  data={selectedActivityDetails.elevation}
+                  distance={selectedActivityDetails.distanceKm}
+                  averageLabel={`상승 ${Math.round(selectedActivity.total_elevation_gain || 0)} m`}
+                  emptyText="상세 고도 스트림 데이터가 없습니다."
+                />
+                <ActivityAreaChart
+                  title="케이던스"
+                  unit="spm"
+                  color="#f472b6"
+                  data={selectedActivityDetails.cadence}
+                  distance={selectedActivityDetails.distanceKm}
+                  averageLabel={`${Math.round(selectedActivity.average_cadence || 0)} spm`}
+                  emptyText="상세 케이던스 스트림 데이터가 없습니다."
+                />
+                <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+                  <h4 className="mb-3 text-sm font-black text-white">활동 요약</h4>
+                  <div className="space-y-3 text-xs">
+                    <div className="flex justify-between border-b border-slate-800 pb-2">
+                      <span className="text-slate-500">Elapsed Time</span>
+                      <span className="font-black text-white">{formatDurationValue(selectedActivity.elapsed_time)}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-800 pb-2">
+                      <span className="text-slate-500">Avg Elapsed Pace</span>
+                      <span className="font-black text-white">{selectedActivityDetails.avgElapsedPace ? `${formatPaceValue(selectedActivityDetails.avgElapsedPace)} /km` : '-'}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-800 pb-2">
+                      <span className="text-slate-500">Fastest Split</span>
+                      <span className="font-black text-white">{selectedActivityDetails.fastestSplit ? `${formatPaceValue(selectedActivityDetails.fastestSplit)} /km` : '-'}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-800 pb-2">
+                      <span className="text-slate-500">Total Work</span>
+                      <span className="font-black text-white">{selectedActivityDetails.totalWork || '-'} kJ</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Max Power</span>
+                      <span className="font-black text-white">{selectedActivityDetails.maxPower || '-'} W</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
