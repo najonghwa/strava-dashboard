@@ -895,9 +895,7 @@ export default function App() {
         .map((activity) => ({
           id: activity.id,
           date: activity.date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }),
-          speed: hasPositiveNumber(activity.average_speed)
-            ? `${(activity.average_speed * 3.6).toFixed(1)} km/h`
-            : `${formatPace(activity.pace_min_per_km)} /km`,
+          pace: `${formatPace(activity.pace_min_per_km)} /km`,
           time: formatDurationValue(activity.moving_time),
           effort: activity.relativeEffort,
         }))
@@ -1518,6 +1516,37 @@ export default function App() {
     };
   }, [selectedActivity]);
 
+  const similarActivities = useMemo(() => {
+    if (!selectedActivity || !hasPositiveNumber(selectedActivity.distance_km)) return [];
+
+    const selectedDate = new Date(selectedActivity.start_date_local);
+    const distanceTolerance = Math.max(0.5, selectedActivity.distance_km * 0.12);
+
+    return activities
+      .filter((activity) => {
+        if (activity.id === selectedActivity.id) return false;
+        if (activity.sport_type !== selectedActivity.sport_type) return false;
+        if (!hasPositiveNumber(activity.distance_km) || !hasPositiveNumber(activity.moving_time)) return false;
+        return Math.abs(activity.distance_km - selectedActivity.distance_km) <= distanceTolerance;
+      })
+      .map((activity) => ({
+        ...activity,
+        date: new Date(activity.start_date_local),
+      }))
+      .filter((activity) => !Number.isNaN(activity.date.getTime()) && activity.date <= selectedDate)
+      .sort((a, b) => b.date - a.date)
+      .slice(0, 5)
+      .map((activity) => ({
+        id: activity.id,
+        name: activity.name,
+        date: activity.date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }),
+        distance: activity.distance_km.toFixed(1),
+        pace: hasPositiveNumber(activity.pace_min_per_km) ? `${formatPace(activity.pace_min_per_km)}/km` : '-',
+        time: formatDurationValue(activity.moving_time),
+        hr: hasPositiveNumber(activity.average_heartrate) ? `${Math.round(activity.average_heartrate)} bpm` : '-',
+      }));
+  }, [activities, selectedActivity]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
       
@@ -2109,7 +2138,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                 </div>
               </div>
 
-              {subscriptionStyleInsights.matchedRouteRows.length > 0 && (
+              {false && subscriptionStyleInsights.matchedRouteRows.length > 0 && (
                 <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div>
@@ -2122,7 +2151,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                     {subscriptionStyleInsights.matchedRouteRows.map((row) => (
                       <div key={row.id} className="grid grid-cols-4 gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs">
                         <span className="font-bold text-slate-200">{row.date}</span>
-                        <span className="text-orange-300">{row.speed}</span>
+                        <span className="text-orange-300">{row.pace}</span>
                         <span className="text-slate-300">{row.time}</span>
                         <span className="text-right text-slate-500">{row.effort} RE</span>
                       </div>
@@ -2212,7 +2241,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                   <p className="text-[11px] text-slate-500 mt-2">판정: <span className="text-slate-300 font-semibold">{subscriptionStyleInsights.riskLabel}</span></p>
                 </div>
 
-                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                <div className="hidden">
                   <p className="text-xs text-slate-400 font-semibold">Matched Activities</p>
                   <p className="mt-1 truncate text-sm font-bold text-white">{subscriptionStyleInsights.matchedRouteName}</p>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-center">
@@ -2222,7 +2251,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                   </div>
                 </div>
 
-                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                <div className="hidden">
                   <p className="text-xs text-slate-400 font-semibold">Power Analysis</p>
                   <p className="text-3xl font-black text-violet-400 mt-1">{subscriptionStyleInsights.avgPower}<span className="text-xs text-slate-500 ml-1">W</span></p>
                   <p className="text-[11px] text-slate-500 mt-2">파워 데이터 포함률 {subscriptionStyleInsights.powerCoverage}%</p>
@@ -2231,7 +2260,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                   </div>
                 </div>
 
-                <div className="bg-slate-950 rounded-xl border border-slate-800 p-4">
+                <div className="hidden">
                   <p className="text-xs text-slate-400 font-semibold">Terrain Adjusted Pace</p>
                   <p className="text-3xl font-black text-cyan-400 mt-1">{subscriptionStyleInsights.terrainAdjustedPace}<span className="text-xs text-slate-500 ml-1">/km</span></p>
                   <p className="text-[11px] text-slate-500 mt-2">상승고도를 반영한 평지 환산 페이스 근사값입니다.</p>
@@ -2392,7 +2421,7 @@ add column if not exists monthly_goal numeric not null default 100;`}
                     {[10, 50, 90].map((x) => (
                       <line key={`hrp-x-${x}`} x1={x} y1="0" x2={x} y2="100" stroke="#0f172a" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
                     ))}
-                    <line x1="10" y1="85" x2="90" y2="15" stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
+                    <line x1="10" y1="15" x2="90" y2="85" stroke="#334155" strokeDasharray="3 3" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
                     {hrVsPacePoints.map((pt, idx) => (
                       <circle
                         key={idx}
@@ -3046,6 +3075,40 @@ add column if not exists monthly_goal numeric not null default 100;`}
                 ) : (
                   <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 text-center text-xs text-slate-500">
                     이 활동에는 km별 스플릿 데이터가 저장되어 있지 않습니다.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-black text-white">비슷한 운동 비교</h4>
+                    <p className="mt-1 text-[11px] text-slate-500">같은 종목 · 비슷한 거리 · 최근 과거 기록 기준</p>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-500">{similarActivities.length}개</span>
+                </div>
+                {similarActivities.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[72px_1fr_70px_64px_58px] gap-2 border-b border-slate-800 pb-2 text-[10px] font-bold text-slate-500">
+                      <span>날짜</span>
+                      <span>운동</span>
+                      <span className="text-right">페이스</span>
+                      <span className="text-right">시간</span>
+                      <span className="text-right">심박</span>
+                    </div>
+                    {similarActivities.map((activity) => (
+                      <div key={activity.id} className="grid grid-cols-[72px_1fr_70px_64px_58px] items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs">
+                        <span className="font-bold text-slate-300">{activity.date}</span>
+                        <span className="truncate text-slate-400">{activity.name} · {activity.distance}km</span>
+                        <span className="text-right font-mono text-orange-300">{activity.pace}</span>
+                        <span className="text-right font-mono text-slate-200">{activity.time}</span>
+                        <span className="text-right text-slate-500">{activity.hr}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 text-center text-xs text-slate-500">
+                    이 운동과 비슷한 거리의 과거 기록이 아직 부족합니다.
                   </div>
                 )}
               </div>
